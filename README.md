@@ -160,6 +160,25 @@ Phase 12 adds a ComfyUI adapter for AutoDL Wan2.2 workflow images such as `wan2.
 /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
 ```
 
+Run a ComfyUI runtime preflight on the GPU host before spending time on generation:
+
+```bash
+COMFYUI_BASE_URL=http://127.0.0.1:6006 \
+COMFYUI_WORKFLOW=/root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json \
+/opt/auto-ai-video/.venv/bin/python -m auto_video.comfyui_runtime_doctor \
+  --base-url-env COMFYUI_BASE_URL \
+  --workflow-env COMFYUI_WORKFLOW \
+  --require-gpu \
+  --require-idle
+```
+
+From your local machine, run the same preflight through SSH:
+
+```bash
+ssh -p <port> root@<autodl-host> \
+  'COMFYUI_BASE_URL=http://127.0.0.1:6006 COMFYUI_WORKFLOW=/root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json /opt/auto-ai-video/.venv/bin/python -m auto_video.comfyui_runtime_doctor --base-url-env COMFYUI_BASE_URL --workflow-env COMFYUI_WORKFLOW --require-gpu --require-idle'
+```
+
 Provider config:
 
 ```yaml
