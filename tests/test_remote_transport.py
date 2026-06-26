@@ -1,10 +1,12 @@
 from pathlib import Path
+import shutil
 
 import pytest
 
-from auto_video.errors import ConfigError
+from auto_video.errors import ConfigError, ProviderError
 from auto_video.project import load_project
-from auto_video.remote_transport import RemoteRunOptions, build_remote_run_plan
+from auto_video.remote_transport import CommandResult, RemoteRunOptions, build_remote_run_plan, run_remote_worker
+from auto_video.worker_runner import run_worker_bundle
 
 
 def test_build_remote_run_plan_includes_upload_run_and_download_commands(demo_project_files, tmp_path):
@@ -111,3 +113,102 @@ def test_build_remote_run_plan_rejects_local_dir_inside_project(demo_project_fil
         )
 
     assert "project root" in str(exc.value)
+
+
+class FakeRemoteRunner:
+    def __init__(self, remote_bundle: Path):
+        self.remote_bundle = remote_bundle
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command):
+        command = tuple(command)
+        self.commands.append(command)
+        if len(self.commands) == 1:
+            source = Path(command[-2])
+            shutil.copytree(source, self.remote_bundle, dirs_exist_ok=True)
+        elif len(self.commands) == 2:
+            run_worker_bundle(self.remote_bundle)
+        elif len(self.commands) == 3:
+            destination = Path(command[-1])
+            shutil.copytree(self.remote_bundle, destination, dirs_exist_ok=True)
+        return CommandResult(command=command)
+
+
+class FailingUploadRunner:
+    def __init__(self):
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command):
+        self.commands.append(tuple(command))
+        raise ProviderError("upload failed")
+
+
+def test_run_remote_worker_exports_runs_downloads_and_imports(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+    remote_bundle = tmp_path / "fake-remote-bundle"
+    runner = FakeRemoteRunner(remote_bundle)
+
+    summary = run_remote_worker(
+        project,
+        RemoteRunOptions(
+            host="fake-gpu",
+            remote_dir="/tmp/remote-bundle",
+            local_dir=tmp_path / "local-run",
+            provider_name="mock",
+            kind="video",
+        ),
+        runner=runner,
+    )
+
+    assert [command[0] for command in runner.commands] == ["rsync", "ssh", "rsync"]
+    assert summary["dry_run"] is False
+    assert summary["project"] == "demo_ad"
+    assert summary["imported"] == ["demo_ad:S01:video:mock"]
+    assert summary["failed"] == []
+    assert (demo_project_files / "manifest.json").exists()
+    assert (demo_project_files / "generated" / "clips" / "S01.mp4").exists()
+    assert (remote_bundle / "result.json").exists()
+
+
+def test_run_remote_worker_dry_run_does_not_export_or_import(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+    runner = FakeRemoteRunner(tmp_path / "remote")
+
+    summary = run_remote_worker(
+        project,
+        RemoteRunOptions(
+            host="fake-gpu",
+            remote_dir="/tmp/remote-bundle",
+            local_dir=tmp_path / "local-run",
+            provider_name="mock",
+            kind="video",
+        ),
+        runner=runner,
+        dry_run=True,
+    )
+
+    assert summary["dry_run"] is True
+    assert runner.commands == []
+    assert not (tmp_path / "local-run" / "bundle").exists()
+    assert not (demo_project_files / "manifest.json").exists()
+
+
+def test_run_remote_worker_failed_upload_does_not_import(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+    runner = FailingUploadRunner()
+
+    with pytest.raises(ProviderError):
+        run_remote_worker(
+            project,
+            RemoteRunOptions(
+                host="fake-gpu",
+                remote_dir="/tmp/remote-bundle",
+                local_dir=tmp_path / "local-run",
+                provider_name="mock",
+                kind="video",
+            ),
+            runner=runner,
+        )
+
+    assert len(runner.commands) == 1
+    assert not (demo_project_files / "manifest.json").exists()

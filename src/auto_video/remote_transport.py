@@ -9,6 +9,7 @@ import tempfile
 from .errors import ConfigError, ProviderError
 from .jobs import utc_now_iso
 from .models import Project
+from .worker_bundle import export_worker_bundle, import_worker_results
 
 UNSAFE_TOKEN_CHARS = set("\n\r\0;&|`$<>")
 
@@ -186,3 +187,50 @@ def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> Remote
         run=tuple(run),
         download=tuple(download),
     )
+
+
+def _base_summary(project: Project, plan: RemoteRunPlan, *, dry_run: bool) -> dict[str, Any]:
+    return {
+        "dry_run": dry_run,
+        "project": project.config.name,
+        "host": plan.host,
+        "remote_dir": plan.remote_dir,
+        "local_bundle": plan.local_bundle.as_posix(),
+        "commands": plan.commands_dict(),
+    }
+
+
+def run_remote_worker(
+    project: Project,
+    options: RemoteRunOptions,
+    *,
+    runner: CommandRunner | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    plan = build_remote_run_plan(project, options)
+    summary = _base_summary(project, plan, dry_run=dry_run)
+    if dry_run:
+        summary["import_action"] = {
+            "project": project.config.root.as_posix(),
+            "bundle": plan.local_bundle.as_posix(),
+        }
+        return summary
+
+    export_worker_bundle(
+        project,
+        plan.local_bundle,
+        kind=options.kind,
+        provider_name=options.provider_name,
+        only=options.only,
+        force=True,
+    )
+    command_runner = runner or SubprocessCommandRunner()
+    command_runner.run(plan.upload)
+    command_runner.run(plan.run)
+    command_runner.run(plan.download)
+    import_summary = import_worker_results(project.config.root, plan.local_bundle)
+    return {
+        **summary,
+        "imported": import_summary["imported"],
+        "failed": import_summary["failed"],
+    }
