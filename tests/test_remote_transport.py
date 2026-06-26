@@ -102,6 +102,22 @@ def test_build_remote_run_plan_rejects_unsafe_remote_dir(demo_project_files, tmp
 
     assert "remote-dir" in str(control_exc.value)
 
+    with pytest.raises(ConfigError) as root_exc:
+        build_remote_run_plan(
+            project,
+            RemoteRunOptions(host="gpu-box", remote_dir="/", local_dir=tmp_path / "work"),
+        )
+
+    assert "remote-dir" in str(root_exc.value)
+
+    with pytest.raises(ConfigError) as parent_exc:
+        build_remote_run_plan(
+            project,
+            RemoteRunOptions(host="gpu-box", remote_dir="/data/../demo", local_dir=tmp_path / "work"),
+        )
+
+    assert "remote-dir" in str(parent_exc.value)
+
 
 def test_build_remote_run_plan_rejects_local_dir_inside_project(demo_project_files):
     project = load_project(demo_project_files)

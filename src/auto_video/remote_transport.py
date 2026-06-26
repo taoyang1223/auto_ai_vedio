@@ -109,6 +109,10 @@ def _validate_remote_dir(remote_dir: str) -> None:
     _reject_unsafe_token("remote-dir", remote_dir)
     if not remote_dir.startswith("/"):
         raise ConfigError("remote-dir must be an absolute path", fix="Use a Unix path beginning with '/'.")
+    if remote_dir.rstrip("/") == "":
+        raise ConfigError("remote-dir cannot be the remote root", fix="Use a dedicated job directory.")
+    if ".." in [part for part in remote_dir.split("/") if part]:
+        raise ConfigError("remote-dir cannot contain '..'", fix="Use a direct absolute job directory.")
 
 
 def _validate_command_token(name: str, value: str) -> None:
