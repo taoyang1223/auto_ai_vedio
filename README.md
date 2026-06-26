@@ -17,6 +17,7 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video worker export demo_project --provider mock --kind video --out /tmp/av-bundle --force
 .venv/bin/python -m auto_video worker run /tmp/av-bundle
 .venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
+.venv/bin/python -m auto_video remote doctor --host gpu-box --remote-dir /data/auto-video/jobs/demo --dry-run
 .venv/bin/python -m auto_video remote run demo_project --provider mock --kind video --host gpu-box --remote-dir /data/auto-video/jobs/demo --local-dir /tmp/av-remote-demo --dry-run
 .venv/bin/python -m auto_video generate demo_project --provider mock
 .venv/bin/python -m auto_video assemble demo_project --dry-run
@@ -48,6 +49,17 @@ Phase 3 adds a portable worker bundle workflow:
     .venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
 
 The first worker is local and deterministic. It proves the export/run/import contract without needing a GPU, cloud account, object storage, FFmpeg, or API key. A future cloud transport only needs to move the bundle to a rented GPU machine, run the same worker command, and bring the result bundle back.
+
+## Remote Doctor
+
+Phase 5 adds a remote preflight command for rented GPU machines:
+
+    .venv/bin/python -m auto_video remote doctor --host gpu-box --remote-dir /data/auto-video/jobs/demo --dry-run
+    .venv/bin/python -m auto_video remote doctor --host gpu-box --remote-dir /data/auto-video/jobs/demo
+
+`remote doctor --dry-run` prints every planned check without opening SSH or touching the remote machine. A real doctor run checks local `ssh`, local `rsync`, SSH connectivity, remote `rsync`, the remote `auto-video` command, the remote worker CLI, and remote directory writability. It prints a JSON report, exits 0 when every check passes, and exits 1 when one or more checks fail.
+
+`remote doctor` may create the requested remote directory with `mkdir -p`. It does not export bundles, upload assets, run providers, install CUDA, install model weights, or modify local project manifests.
 
 ## SSH Remote Worker Transport
 

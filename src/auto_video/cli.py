@@ -11,6 +11,7 @@ from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project
 from .render import build_render_plan
+from .remote_doctor import RemoteDoctorOptions, run_remote_doctor
 from .remote_transport import RemoteRunOptions, run_remote_worker
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
@@ -169,6 +170,13 @@ def build_parser() -> argparse.ArgumentParser:
     remote_run.add_argument("--rsync-option", action="append", default=[])
     remote_run.add_argument("--dry-run", action="store_true")
 
+    remote_doctor = remote_sub.add_parser("doctor")
+    remote_doctor.add_argument("--host", required=True)
+    remote_doctor.add_argument("--remote-dir", required=True)
+    remote_doctor.add_argument("--remote-auto-video", default="auto-video")
+    remote_doctor.add_argument("--ssh-option", action="append", default=[])
+    remote_doctor.add_argument("--dry-run", action="store_true")
+
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
@@ -288,6 +296,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
+        if args.command == "remote" and args.remote_command == "doctor":
+            result = run_remote_doctor(
+                RemoteDoctorOptions(
+                    host=args.host,
+                    remote_dir=args.remote_dir,
+                    remote_auto_video=args.remote_auto_video,
+                    ssh_options=tuple(args.ssh_option),
+                ),
+                dry_run=args.dry_run,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 1
         if args.command == "providers" and args.providers_command == "health":
             print(json.dumps({"mock": "ok"}, indent=2))
             return 0

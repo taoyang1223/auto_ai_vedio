@@ -2,6 +2,7 @@ import json
 import shutil
 from pathlib import Path
 
+from auto_video import remote_doctor
 from auto_video import remote_transport
 from auto_video.cli import main
 from auto_video.remote_transport import CommandResult
@@ -23,6 +24,103 @@ class CliFakeRemoteRunner:
         elif len(self.commands) == 3:
             shutil.copytree(self.remote_bundle, Path(command[-1]), dirs_exist_ok=True)
         return CommandResult(command=command)
+
+
+class CliDoctorRunner:
+    def __init__(self, *, fail_when: str | None = None):
+        self.fail_when = fail_when
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command):
+        command = tuple(command)
+        self.commands.append(command)
+        if self.fail_when and self.fail_when in command:
+            return CommandResult(command=command, returncode=1, stderr=f"{self.fail_when} missing")
+        return CommandResult(command=command, stdout="ok\n")
+
+
+def test_remote_doctor_cli_dry_run_prints_planned_checks(monkeypatch, capsys):
+    runner = CliDoctorRunner()
+    monkeypatch.setattr(remote_doctor, "SubprocessDoctorCommandRunner", lambda: runner)
+
+    assert (
+        main(
+            [
+                "remote",
+                "doctor",
+                "--host",
+                "gpu-box",
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is True
+    assert payload["dry_run"] is True
+    assert [check["status"] for check in payload["checks"]] == ["planned"] * 7
+    assert runner.commands == []
+
+
+def test_remote_doctor_cli_success_returns_zero(monkeypatch, capsys):
+    runner = CliDoctorRunner()
+    monkeypatch.setattr(remote_doctor, "SubprocessDoctorCommandRunner", lambda: runner)
+
+    assert (
+        main(
+            [
+                "remote",
+                "doctor",
+                "--host",
+                "gpu-box",
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+                "--ssh-option",
+                "StrictHostKeyChecking=no",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is True
+    assert payload["checks"][2]["command"] == [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "gpu-box",
+        "true",
+    ]
+    assert len(runner.commands) == 8
+
+
+def test_remote_doctor_cli_failure_returns_one(monkeypatch, capsys):
+    runner = CliDoctorRunner(fail_when="rsync")
+    monkeypatch.setattr(remote_doctor, "SubprocessDoctorCommandRunner", lambda: runner)
+
+    assert (
+        main(
+            [
+                "remote",
+                "doctor",
+                "--host",
+                "gpu-box",
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+            ]
+        )
+        == 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is False
+    assert [check["name"] for check in payload["checks"] if check["status"] == "failed"] == [
+        "local_rsync",
+        "remote_rsync",
+    ]
 
 
 def test_remote_cli_dry_run_prints_commands_without_manifest(tmp_path: Path, capsys):
