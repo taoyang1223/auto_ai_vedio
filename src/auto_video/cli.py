@@ -6,7 +6,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .errors import AutoVideoError
-from .pipeline import generate_images, generate_videos
+from .job_store import JobStore
+from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project
 from .render import build_render_plan
@@ -113,6 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("project")
     probe.add_argument("--dry-run", action="store_true")
 
+    jobs = sub.add_parser("jobs")
+    jobs_sub = jobs.add_subparsers(dest="jobs_command")
+
+    jobs_plan = jobs_sub.add_parser("plan")
+    jobs_plan.add_argument("project")
+    jobs_plan.add_argument("--provider")
+    jobs_plan.add_argument("--kind", choices=["image", "video", "audio"], default="video")
+    jobs_plan.add_argument("--only")
+
+    jobs_submit = jobs_sub.add_parser("submit")
+    jobs_submit.add_argument("project")
+    jobs_submit.add_argument("--provider")
+    jobs_submit.add_argument("--kind", choices=["image", "video", "audio"], default="video")
+    jobs_submit.add_argument("--only")
+
+    jobs_status = jobs_sub.add_parser("status")
+    jobs_status.add_argument("project")
+
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
@@ -163,6 +182,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "probe":
             report = probe_project(load_project(args.project), dry_run=args.dry_run)
             print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "jobs" and args.jobs_command == "plan":
+            result = plan_jobs(
+                load_project(args.project),
+                kind=args.kind,
+                provider_name=args.provider,
+                only=_csv(args.only),
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "jobs" and args.jobs_command == "submit":
+            project = load_project(args.project)
+            results = submit_jobs(
+                project,
+                kind=args.kind,
+                provider_name=args.provider,
+                only=_csv(args.only),
+            )
+            print(
+                json.dumps(
+                    {"submitted": [result.job_id for result in results], "count": len(results)},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return 0
+        if args.command == "jobs" and args.jobs_command == "status":
+            project = load_project(args.project)
+            store = JobStore(project.config.root / "manifest.json", project_name=project.config.name)
+            print(json.dumps(store.summary(), ensure_ascii=False, indent=2))
             return 0
         if args.command == "providers" and args.providers_command == "health":
             print(json.dumps({"mock": "ok"}, indent=2))
