@@ -12,6 +12,8 @@ from .probe import probe_project
 from .project import load_project
 from .render import build_render_plan
 from .validation import validate_project
+from .worker_bundle import export_worker_bundle, import_worker_results
+from .worker_runner import run_worker_bundle
 
 
 PROJECT_YAML = """name: demo_ad
@@ -132,6 +134,24 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_status = jobs_sub.add_parser("status")
     jobs_status.add_argument("project")
 
+    worker = sub.add_parser("worker")
+    worker_sub = worker.add_subparsers(dest="worker_command")
+
+    worker_export = worker_sub.add_parser("export")
+    worker_export.add_argument("project")
+    worker_export.add_argument("--provider")
+    worker_export.add_argument("--kind", choices=["image", "video", "audio"], default="video")
+    worker_export.add_argument("--only")
+    worker_export.add_argument("--out", required=True)
+    worker_export.add_argument("--force", action="store_true")
+
+    worker_run = worker_sub.add_parser("run")
+    worker_run.add_argument("bundle")
+
+    worker_import = worker_sub.add_parser("import")
+    worker_import.add_argument("project")
+    worker_import.add_argument("bundle")
+
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
@@ -212,6 +232,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             project = load_project(args.project)
             store = JobStore(project.config.root / "manifest.json", project_name=project.config.name)
             print(json.dumps(store.summary(), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "worker" and args.worker_command == "export":
+            result = export_worker_bundle(
+                load_project(args.project),
+                Path(args.out),
+                kind=args.kind,
+                provider_name=args.provider,
+                only=_csv(args.only),
+                force=args.force,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "worker" and args.worker_command == "run":
+            result = run_worker_bundle(Path(args.bundle))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "worker" and args.worker_command == "import":
+            result = import_worker_results(Path(args.project), Path(args.bundle))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "providers" and args.providers_command == "health":
             print(json.dumps({"mock": "ok"}, indent=2))
