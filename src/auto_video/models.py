@@ -74,6 +74,16 @@ class RenderConfig:
 
 
 @dataclass(frozen=True)
+class ProviderConfig:
+    mode: str = "local"
+    endpoint_env: str | None = None
+    token_env: str | None = None
+    timeout_seconds: int = 900
+    max_attempts: int = 1
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     name: str
     root: Path
@@ -85,6 +95,7 @@ class ProjectConfig:
     default_image_provider: str = "mock"
     default_audio_provider: str = "mock"
     render: RenderConfig = field(default_factory=RenderConfig)
+    providers: dict[str, ProviderConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for field_name, provider in {

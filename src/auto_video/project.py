@@ -11,6 +11,7 @@ from .models import (
     AssetRef,
     Project,
     ProjectConfig,
+    ProviderConfig,
     RenderConfig,
     RenderText,
     RenderTransition,
@@ -65,6 +66,30 @@ def _render_config(data: dict[str, Any]) -> RenderConfig:
     )
 
 
+def _provider_configs(data: dict[str, Any]) -> dict[str, ProviderConfig]:
+    providers = data.get("providers") or {}
+    if not isinstance(providers, dict):
+        raise ConfigError("providers must be a mapping", fix="Use provider names as keys under providers.")
+    result: dict[str, ProviderConfig] = {}
+    for name, raw in providers.items():
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            raise ConfigError(f"provider {name} config must be a mapping", fix="Use key/value provider settings.")
+        known = {"mode", "endpoint_env", "token_env", "timeout_seconds", "max_attempts"}
+        options = {key: value for key, value in raw.items() if key not in known}
+        result[str(name)] = ProviderConfig(
+            mode=str(raw.get("mode", "local")),
+            endpoint_env=raw.get("endpoint_env"),
+            token_env=raw.get("token_env"),
+            timeout_seconds=int(raw.get("timeout_seconds", 900)),
+            max_attempts=int(raw.get("max_attempts", 1)),
+            options=options,
+        )
+    result.setdefault("mock", ProviderConfig(mode="local", timeout_seconds=30, max_attempts=1))
+    return result
+
+
 def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
     name = data.get("name")
     if not name:
@@ -80,6 +105,7 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
         default_image_provider=str(data.get("default_image_provider", "mock")),
         default_audio_provider=str(data.get("default_audio_provider", "mock")),
         render=_render_config(data),
+        providers=_provider_configs(data),
     )
 
 
