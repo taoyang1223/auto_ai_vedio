@@ -1,1 +1,21 @@
 .worktrees/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Generated AI video artifacts
+generated/
+renders/
+reports/
+*.mp4
+*.mov
+*.wav
+*.mp3
+
+# Local secrets
+.env
+config.toml
