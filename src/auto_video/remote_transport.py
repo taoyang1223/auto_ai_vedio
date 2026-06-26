@@ -170,6 +170,13 @@ def _ssh_option_args(options: tuple[str, ...]) -> list[str]:
     return args
 
 
+def _rsync_ssh_args(options: tuple[str, ...]) -> tuple[str, ...]:
+    if not options:
+        return ()
+    remote_shell = " ".join(("ssh", *_ssh_option_args(options)))
+    return ("-e", remote_shell)
+
+
 def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> RemoteRunPlan:
     _validate_host(options.host)
     _validate_remote_dir(options.remote_dir)
@@ -185,7 +192,7 @@ def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> Remote
     remote_dir = options.remote_dir.rstrip("/") or "/"
     remote_spec = f"{options.host}:{_with_trailing_slash(remote_dir)}"
     local_spec = _with_trailing_slash(local_bundle.as_posix())
-    rsync_prefix = ("rsync", "-az", *options.rsync_options, "--delete")
+    rsync_prefix = ("rsync", "-az", *_rsync_ssh_args(options.ssh_options), *options.rsync_options, "--delete")
     upload = (*rsync_prefix, local_spec, remote_spec)
     download = (*rsync_prefix, remote_spec, local_spec)
     run = (

@@ -34,6 +34,8 @@ def test_build_remote_run_plan_includes_upload_run_and_download_commands(demo_pr
     assert list(plan.upload) == [
         "rsync",
         "-az",
+        "-e",
+        "ssh -o StrictHostKeyChecking=no",
         "--info=progress2",
         "--delete",
         f"{(local_dir / 'bundle').as_posix()}/",
@@ -53,10 +55,36 @@ def test_build_remote_run_plan_includes_upload_run_and_download_commands(demo_pr
     assert list(plan.download) == [
         "rsync",
         "-az",
+        "-e",
+        "ssh -o StrictHostKeyChecking=no",
         "--info=progress2",
         "--delete",
         "gpu-box:/data/auto-video/jobs/demo/",
         f"{(local_dir / 'bundle').as_posix()}/",
+    ]
+
+
+def test_build_remote_run_plan_applies_ssh_port_to_rsync(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+
+    plan = build_remote_run_plan(
+        project,
+        RemoteRunOptions(
+            host="root@connect.westd.seetacloud.com",
+            remote_dir="/root/auto-video/jobs/demo",
+            local_dir=tmp_path / "remote-work",
+            ssh_options=("Port=13159",),
+        ),
+    )
+
+    assert list(plan.upload[:4]) == ["rsync", "-az", "-e", "ssh -o Port=13159"]
+    assert list(plan.download[:4]) == ["rsync", "-az", "-e", "ssh -o Port=13159"]
+    assert list(plan.run[:5]) == [
+        "ssh",
+        "-o",
+        "Port=13159",
+        "root@connect.westd.seetacloud.com",
+        "auto-video",
     ]
 
 

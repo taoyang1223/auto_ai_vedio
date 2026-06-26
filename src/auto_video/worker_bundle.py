@@ -82,6 +82,26 @@ def _copy_reference_assets(project: Project, bundle: Path, jobs: list[Generation
     return refs
 
 
+def _bundle_ref_paths(refs: list[dict[str, Any]]) -> dict[tuple[str, str], str]:
+    paths: dict[tuple[str, str], str] = {}
+    for ref in refs:
+        bundle_path = ref.get("bundle_path")
+        if bundle_path:
+            paths[(str(ref["job_id"]), str(ref["source"]))] = str(bundle_path)
+    return paths
+
+
+def _job_dict_for_bundle(job: GenerationJob, ref_paths: dict[tuple[str, str], str]) -> dict[str, Any]:
+    data = job.to_dict()
+    data["refs"] = [
+        {**ref, "path": bundle_path, "exists": True}
+        if (bundle_path := ref_paths.get((job.id, str(ref["path"]))))
+        else ref
+        for ref in data.get("refs", [])
+    ]
+    return data
+
+
 def export_worker_bundle(
     project: Project,
     bundle: Path,
@@ -100,10 +120,13 @@ def export_worker_bundle(
     _copy_project_snapshot(project, bundle)
 
     jobs = build_jobs(project, kind=kind, provider_name=provider_name, only=only)
+    refs = _copy_reference_assets(project, bundle, jobs)
+    ref_paths = _bundle_ref_paths(refs)
     job_paths: list[str] = []
     for job in jobs:
         job_path = bundle / "jobs" / safe_bundle_filename(job.id)
-        job_path.write_text(json.dumps(job.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        job_payload = _job_dict_for_bundle(job, ref_paths)
+        job_path.write_text(json.dumps(job_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         job_paths.append(_relative(job_path, bundle))
 
     index = {
@@ -112,7 +135,7 @@ def export_worker_bundle(
         "created_at": utc_now_iso(),
         "source_root": project.config.root.as_posix(),
         "jobs": job_paths,
-        "refs": _copy_reference_assets(project, bundle, jobs),
+        "refs": refs,
         "results": [],
     }
     (bundle / "bundle.json").write_text(json.dumps(index, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

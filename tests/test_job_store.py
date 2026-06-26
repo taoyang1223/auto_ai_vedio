@@ -47,6 +47,46 @@ def test_job_store_records_success_result_and_legacy_clip(demo_project_files):
     assert data["shots"]["S01"]["status"] == "generated"
 
 
+def test_job_store_success_result_clears_previous_shot_error(demo_project_files):
+    project = load_project(demo_project_files)
+    job = build_jobs(project, kind="video", provider_name="mock")[0]
+    clip = demo_project_files / "generated" / "clips" / "S01.mp4"
+    store = JobStore(demo_project_files / "manifest.json", project_name=project.config.name)
+
+    store.record_job(job)
+    store.record_result(
+        ProviderResult(
+            job_id=job.id,
+            shot_id="S01",
+            kind="video",
+            provider="mock",
+            status="retryable_failed",
+            error="NoGPU",
+            retryable=True,
+        )
+    )
+    store.record_result(
+        ProviderResult(
+            job_id=job.id,
+            shot_id="S01",
+            kind="video",
+            provider="mock",
+            status="succeeded",
+            path=clip,
+            duration=5.0,
+        )
+    )
+    store.save()
+
+    data = json.loads((demo_project_files / "manifest.json").read_text(encoding="utf-8"))
+    assert data["jobs"][job.id]["status"] == "succeeded"
+    assert data["jobs"][job.id]["attempts"] == 2
+    assert data["jobs"][job.id]["error"] is None
+    assert data["shots"]["S01"]["status"] == "generated"
+    assert "error" not in data["shots"]["S01"]
+    assert "retryable" not in data["shots"]["S01"]
+
+
 def test_job_store_records_retryable_failure_without_clip(demo_project_files):
     project = load_project(demo_project_files)
     job = build_jobs(project, kind="video", provider_name="mock")[0]

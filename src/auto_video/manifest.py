@@ -51,8 +51,12 @@ class ManifestStore:
             shot["duration"] = result.duration
         if result.error is not None:
             shot["error"] = result.error
+        else:
+            shot.pop("error", None)
         if result.retryable:
             shot["retryable"] = True
+        else:
+            shot.pop("retryable", None)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

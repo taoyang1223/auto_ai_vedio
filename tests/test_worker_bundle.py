@@ -28,6 +28,10 @@ def test_export_worker_bundle_creates_layout_and_copies_refs(demo_project_files,
     assert (bundle / "logs").is_dir()
     assert not (demo_project_files / "manifest.json").exists()
 
+    job = json.loads((bundle / "jobs" / "demo_ad_S01_video_mock.json").read_text(encoding="utf-8"))
+    assert job["refs"][0]["path"] == "refs/S01/assets_refs_S01.txt"
+    assert job["refs"][0]["exists"] is True
+
     index = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
     assert index["refs"][0]["source"] == "assets/refs/S01.txt"
     assert index["refs"][0]["bundle_path"] == "refs/S01/assets_refs_S01.txt"
