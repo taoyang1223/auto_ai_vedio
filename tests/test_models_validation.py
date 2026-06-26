@@ -2,6 +2,8 @@ import pytest
 
 from auto_video.errors import ConfigError
 from auto_video.models import AssetRef, ShotPlan
+from auto_video.project import load_project
+from auto_video.validation import validate_project
 
 
 def test_asset_ref_rejects_unknown_role():
@@ -16,3 +18,8 @@ def test_shot_plan_rejects_non_positive_duration():
         ShotPlan(id="S01", duration=0, visual_prompt="test")
     assert "duration" in str(exc.value)
     assert "S01" in str(exc.value)
+
+
+def test_validate_project_accepts_demo_project(demo_project_files):
+    project = load_project(demo_project_files)
+    assert validate_project(project) == []
