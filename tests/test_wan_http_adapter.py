@@ -116,6 +116,19 @@ def _run_adapter(args: list[str], *, env: dict[str, str] | None = None):
     )
 
 
+def _run_adapter_module(args: list[str], *, env: dict[str, str] | None = None):
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "auto_video.wan_http_adapter", *args],
+        capture_output=True,
+        text=True,
+        env=full_env,
+        check=False,
+    )
+
+
 def test_wan_http_adapter_posts_i2v_with_image_reference(tmp_path: Path):
     image = tmp_path / "first-frame.png"
     image.write_bytes(b"fake-image")
@@ -194,6 +207,29 @@ def test_wan_http_adapter_posts_t2v_without_image_reference(tmp_path: Path):
     body = server.records[0]["body"]
     assert body["num_frames"] == 33
     assert "image_base64" not in body
+
+
+def test_wan_http_adapter_module_entrypoint_posts_t2v(tmp_path: Path):
+    job = _payload(tmp_path, refs=[], duration=1.0, fps=10)
+    output = tmp_path / "out.mp4"
+
+    with FakeWanServer(body=b"module-mp4") as server:
+        completed = _run_adapter_module(
+            [
+                "--base-url",
+                server.url,
+                "--job",
+                job.as_posix(),
+                "--project-root",
+                (tmp_path / "project").as_posix(),
+                "--output",
+                output.as_posix(),
+            ]
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert output.read_bytes() == b"module-mp4"
+    assert server.records[0]["path"] == "/t2v"
 
 
 def test_wan_http_adapter_reads_base_url_and_token_from_env(tmp_path: Path):

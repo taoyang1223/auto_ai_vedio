@@ -44,7 +44,8 @@ def test_build_wan_remote_smoke_plan_includes_three_commands(tmp_path: Path):
         "gpu-box",
         "WAN_BASE_URL=http://127.0.0.1:8082",
         "python",
-        "scripts/wan_runtime_doctor.py",
+        "-m",
+        "auto_video.wan_runtime_doctor",
         "--base-url-env",
         "WAN_BASE_URL",
         "--require-i2v",
@@ -98,6 +99,23 @@ def test_execute_wan_remote_smoke_runs_commands_in_order(tmp_path: Path):
     assert result["ok"] is True
     assert [step["name"] for step in result["steps"]] == ["remote_doctor", "wan_runtime_doctor", "remote_run"]
     assert [command[0] for command in runner.commands] == [sys.executable, "ssh", sys.executable]
+
+
+def test_wan_remote_smoke_keeps_script_doctor_targets_as_paths(tmp_path: Path):
+    plan = build_wan_remote_smoke_plan(
+        WanRemoteSmokeOptions(
+            project=tmp_path / "demo",
+            host="gpu-box",
+            remote_dir="/data/auto-video/jobs/demo",
+            wan_base_url="http://127.0.0.1:8082",
+            remote_wan_doctor="/opt/auto-video/wan_runtime_doctor.py",
+        )
+    )
+
+    assert plan["commands"]["wan_runtime_doctor"][3:5] == [
+        "python",
+        "/opt/auto-video/wan_runtime_doctor.py",
+    ]
 
 
 def test_execute_wan_remote_smoke_stops_on_failure(tmp_path: Path):

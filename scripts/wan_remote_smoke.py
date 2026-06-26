@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--local-dir")
     parser.add_argument("--remote-auto-video", default="auto-video")
     parser.add_argument("--remote-python", default="python")
-    parser.add_argument("--remote-wan-doctor", default="scripts/wan_runtime_doctor.py")
+    parser.add_argument("--remote-wan-doctor", default="auto_video.wan_runtime_doctor")
     parser.add_argument("--require-i2v", action="store_true")
     parser.add_argument("--require-t2v", action="store_true")
     parser.add_argument("--ssh-option", action="append", default=[])

@@ -23,7 +23,7 @@ class WanRemoteSmokeOptions:
     local_dir: Path | None = None
     remote_auto_video: str = "auto-video"
     remote_python: str = "python"
-    remote_wan_doctor: str = "scripts/wan_runtime_doctor.py"
+    remote_wan_doctor: str = "auto_video.wan_runtime_doctor"
     require_i2v: bool = False
     require_t2v: bool = False
     ssh_options: tuple[str, ...] = ()
@@ -100,8 +100,7 @@ def _commands(options: WanRemoteSmokeOptions) -> dict[str, tuple[str, ...]]:
         *_ssh_option_args(options.ssh_options),
         options.host,
         f"{options.wan_base_url_env}={options.wan_base_url}",
-        options.remote_python,
-        options.remote_wan_doctor,
+        *_remote_python_target(options.remote_python, options.remote_wan_doctor),
         "--base-url-env",
         options.wan_base_url_env,
         *_optional_token_env(options.wan_token_env),
@@ -137,6 +136,12 @@ def _commands(options: WanRemoteSmokeOptions) -> dict[str, tuple[str, ...]]:
         "wan_runtime_doctor": tuple(wan_runtime_doctor),
         "remote_run": tuple(remote_run),
     }
+
+
+def _remote_python_target(remote_python: str, target: str) -> tuple[str, ...]:
+    if target.endswith(".py") or "/" in target:
+        return (remote_python, target)
+    return (remote_python, "-m", target)
 
 
 def _optional(name: str, value: str | None) -> tuple[str, ...]:

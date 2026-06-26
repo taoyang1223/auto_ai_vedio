@@ -66,7 +66,7 @@ The same provider config works in worker bundles and remote GPU runs when the co
 
 ## Wan HTTP Adapter
 
-Phase 7 includes `scripts/wan_http_adapter.py` for Wan HTTP services compatible with the old `/root/ai_vedio/tools/providers/wan.py` contract:
+Phase 7 includes a Wan HTTP adapter for services compatible with the old `/root/ai_vedio/tools/providers/wan.py` contract:
 
 ```yaml
 default_video_provider: wan_http
@@ -77,7 +77,8 @@ providers:
     timeout_seconds: 1800
     command:
       - python
-      - scripts/wan_http_adapter.py
+      - -m
+      - auto_video.wan_http_adapter
       - --base-url-env
       - WAN_BASE_URL
       - --token-env
@@ -88,16 +89,16 @@ Run locally through an SSH tunnel:
 
 ```bash
 ssh -fN -L 8082:127.0.0.1:8082 -p <port> root@<gpu-host>
-WAN_BASE_URL=http://127.0.0.1:8082 python scripts/wan_runtime_doctor.py --base-url-env WAN_BASE_URL --require-i2v
+WAN_BASE_URL=http://127.0.0.1:8082 python -m auto_video.wan_runtime_doctor --base-url-env WAN_BASE_URL --require-i2v
 WAN_BASE_URL=http://127.0.0.1:8082 .venv/bin/python -m auto_video jobs submit demo_project --provider wan_http --kind video
 ```
 
 The adapter calls `/i2v` when a shot has an existing image reference and `/t2v` otherwise. It maps prompt, negative prompt, duration, width, height, fps, steps, guidance scale, and seed into the Wan request body.
 
-Phase 8 adds `scripts/wan_runtime_doctor.py` for checking the Wan service before generation:
+Phase 8 adds `auto_video.wan_runtime_doctor` for checking the Wan service before generation:
 
 ```bash
-python scripts/wan_runtime_doctor.py --base-url http://127.0.0.1:8082 --require-i2v --require-t2v
+python -m auto_video.wan_runtime_doctor --base-url http://127.0.0.1:8082 --require-i2v --require-t2v
 ```
 
 It only calls `GET /health`, prints JSON, and exits 1 if the service is unreachable or the required I2V/T2V model is not loaded.
@@ -115,7 +116,7 @@ python scripts/wan_remote_smoke.py \
 
 The command prints the planned `remote doctor`, remote Wan runtime doctor, and `remote run` commands by default. Add `--execute` to run them in order. `remote run` also supports repeatable `--remote-env NAME=value`, which is how `WAN_BASE_URL` reaches the remote worker:
 
-If `scripts/wan_runtime_doctor.py` is not available from the remote login directory, pass `--remote-wan-doctor /absolute/path/to/wan_runtime_doctor.py`.
+The remote Wan doctor now defaults to `python -m auto_video.wan_runtime_doctor`, so the installed `auto-video` package is enough on the GPU host. If you need to use a standalone script instead, pass `--remote-wan-doctor /absolute/path/to/wan_runtime_doctor.py`.
 
 ```bash
 .venv/bin/python -m auto_video remote run demo_project --provider wan_http --kind video \

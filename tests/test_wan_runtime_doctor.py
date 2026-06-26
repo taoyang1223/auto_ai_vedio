@@ -59,6 +59,19 @@ def _run_doctor(args: list[str], *, env: dict[str, str] | None = None):
     )
 
 
+def _run_doctor_module(args: list[str], *, env: dict[str, str] | None = None):
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "auto_video.wan_runtime_doctor", *args],
+        capture_output=True,
+        text=True,
+        env=full_env,
+        check=False,
+    )
+
+
 def test_wan_runtime_doctor_healthy_service_exits_zero():
     with FakeHealthServer(
         {
@@ -92,6 +105,15 @@ def test_wan_runtime_doctor_sends_bearer_token_from_env():
     assert completed.returncode == 0, completed.stderr
     assert server.records[0]["headers"]["Authorization"] == "Bearer secret-token"
     assert "secret-token" not in completed.stdout
+
+
+def test_wan_runtime_doctor_module_entrypoint_exits_zero():
+    with FakeHealthServer({"status": "ok", "i2v_loaded": True}) as server:
+        completed = _run_doctor_module(["--base-url", server.url, "--require-i2v"])
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["ok"] is True
 
 
 def test_wan_runtime_doctor_require_i2v_failure_exits_one():
