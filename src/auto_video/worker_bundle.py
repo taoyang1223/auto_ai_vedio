@@ -43,9 +43,11 @@ def _ensure_empty_bundle(path: Path, *, force: bool) -> None:
 
 
 def _ensure_bundle_target(project_root: Path, bundle: Path) -> None:
-    if bundle.resolve() == project_root.resolve():
+    project_root = project_root.resolve()
+    bundle = bundle.resolve()
+    if bundle == project_root or project_root in bundle.parents:
         raise ConfigError(
-            "bundle output cannot be the project root",
+            "bundle output cannot be inside the project root",
             fix="Choose a separate --out directory so --force cannot remove project files.",
         )
 

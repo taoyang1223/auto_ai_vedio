@@ -66,3 +66,14 @@ def test_export_rejects_project_root_as_bundle_even_with_force(demo_project_file
 
     assert "project root" in str(exc.value)
     assert (demo_project_files / "project.yaml").exists()
+
+
+def test_export_rejects_bundle_inside_project_even_with_force(demo_project_files):
+    project = load_project(demo_project_files)
+    bundle = demo_project_files / "assets"
+
+    with pytest.raises(ConfigError) as exc:
+        export_worker_bundle(project, bundle, kind="video", provider_name="mock", force=True)
+
+    assert "project root" in str(exc.value)
+    assert (demo_project_files / "assets" / "refs" / "S01.txt").exists()
