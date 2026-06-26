@@ -168,6 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
     remote_run.add_argument("--remote-auto-video", default="auto-video")
     remote_run.add_argument("--ssh-option", action="append", default=[])
     remote_run.add_argument("--rsync-option", action="append", default=[])
+    remote_run.add_argument("--remote-env", action="append", default=[])
     remote_run.add_argument("--dry-run", action="store_true")
 
     remote_doctor = remote_sub.add_parser("doctor")
@@ -291,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     remote_auto_video=args.remote_auto_video,
                     ssh_options=tuple(args.ssh_option),
                     rsync_options=tuple(args.rsync_option),
+                    remote_env=tuple(args.remote_env),
                 ),
                 dry_run=args.dry_run,
             )

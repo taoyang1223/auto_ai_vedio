@@ -22,6 +22,7 @@ def test_build_remote_run_plan_includes_upload_run_and_download_commands(demo_pr
             remote_auto_video="/opt/auto-video",
             ssh_options=("StrictHostKeyChecking=no",),
             rsync_options=("--info=progress2",),
+            remote_env=("WAN_BASE_URL=http://127.0.0.1:8082",),
         ),
     )
 
@@ -43,6 +44,7 @@ def test_build_remote_run_plan_includes_upload_run_and_download_commands(demo_pr
         "-o",
         "StrictHostKeyChecking=no",
         "gpu-box",
+        "WAN_BASE_URL=http://127.0.0.1:8082",
         "/opt/auto-video",
         "worker",
         "run",
@@ -129,6 +131,36 @@ def test_build_remote_run_plan_rejects_local_dir_inside_project(demo_project_fil
         )
 
     assert "project root" in str(exc.value)
+
+
+def test_build_remote_run_plan_rejects_unsafe_remote_env(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+
+    with pytest.raises(ConfigError) as name_exc:
+        build_remote_run_plan(
+            project,
+            RemoteRunOptions(
+                host="gpu-box",
+                remote_dir="/data/demo",
+                local_dir=tmp_path / "work",
+                remote_env=("BAD-NAME=value",),
+            ),
+        )
+
+    assert "remote-env" in str(name_exc.value)
+
+    with pytest.raises(ConfigError) as value_exc:
+        build_remote_run_plan(
+            project,
+            RemoteRunOptions(
+                host="gpu-box",
+                remote_dir="/data/demo",
+                local_dir=tmp_path / "work",
+                remote_env=("WAN_BASE_URL=http://x;rm",),
+            ),
+        )
+
+    assert "remote-env" in str(value_exc.value)
 
 
 class FakeRemoteRunner:

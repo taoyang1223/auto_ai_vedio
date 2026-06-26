@@ -102,6 +102,28 @@ python scripts/wan_runtime_doctor.py --base-url http://127.0.0.1:8082 --require-
 
 It only calls `GET /health`, prints JSON, and exits 1 if the service is unreachable or the required I2V/T2V model is not loaded.
 
+Phase 9 adds remote Wan smoke planning and remote worker environment injection:
+
+```bash
+python scripts/wan_remote_smoke.py \
+  --project demo_project \
+  --host gpu-box \
+  --remote-dir /data/auto-video/jobs/demo \
+  --wan-base-url http://127.0.0.1:8082 \
+  --require-i2v
+```
+
+The command prints the planned `remote doctor`, remote Wan runtime doctor, and `remote run` commands by default. Add `--execute` to run them in order. `remote run` also supports repeatable `--remote-env NAME=value`, which is how `WAN_BASE_URL` reaches the remote worker:
+
+If `scripts/wan_runtime_doctor.py` is not available from the remote login directory, pass `--remote-wan-doctor /absolute/path/to/wan_runtime_doctor.py`.
+
+```bash
+.venv/bin/python -m auto_video remote run demo_project --provider wan_http --kind video \
+  --host gpu-box \
+  --remote-dir /data/auto-video/jobs/demo \
+  --remote-env WAN_BASE_URL=http://127.0.0.1:8082
+```
+
 ## Cloud Worker Contract
 
 Phase 3 adds a portable worker bundle workflow:

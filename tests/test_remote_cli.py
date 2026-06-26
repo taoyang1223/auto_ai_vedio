@@ -146,6 +146,8 @@ def test_remote_cli_dry_run_prints_commands_without_manifest(tmp_path: Path, cap
                 str(local_dir),
                 "--ssh-option",
                 "StrictHostKeyChecking=no",
+                "--remote-env",
+                "WAN_BASE_URL=http://127.0.0.1:8082",
                 "--dry-run",
             ]
         )
@@ -161,6 +163,7 @@ def test_remote_cli_dry_run_prints_commands_without_manifest(tmp_path: Path, cap
         "-o",
         "StrictHostKeyChecking=no",
         "gpu-box",
+        "WAN_BASE_URL=http://127.0.0.1:8082",
         "auto-video",
         "worker",
         "run",

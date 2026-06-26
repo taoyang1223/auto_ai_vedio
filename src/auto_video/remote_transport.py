@@ -12,6 +12,7 @@ from .models import Project
 from .worker_bundle import export_worker_bundle, import_worker_results
 
 UNSAFE_TOKEN_CHARS = set("\n\r\0;&|`$<>")
+ENV_NAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class RemoteRunOptions:
     remote_auto_video: str = "auto-video"
     ssh_options: tuple[str, ...] = ()
     rsync_options: tuple[str, ...] = ()
+    remote_env: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -124,6 +126,19 @@ def _validate_option_values(name: str, values: tuple[str, ...]) -> None:
         _reject_unsafe_token(name, value)
 
 
+def _validate_remote_env(values: tuple[str, ...]) -> None:
+    for value in values:
+        if "=" not in value:
+            raise ConfigError("remote-env must use NAME=value", fix="Pass remote environment as NAME=value.")
+        name, env_value = value.split("=", 1)
+        if not name or name[0].isdigit() or any(char not in ENV_NAME_CHARS for char in name):
+            raise ConfigError(
+                "remote-env has an invalid variable name",
+                fix="Use names like WAN_BASE_URL with letters, numbers, and underscores.",
+            )
+        _reject_unsafe_token("remote-env", env_value)
+
+
 def _safe_project_name(value: str) -> str:
     safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value).strip("_")
     return safe or "project"
@@ -161,6 +176,7 @@ def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> Remote
     _validate_command_token("remote-auto-video", options.remote_auto_video)
     _validate_option_values("ssh-option", options.ssh_options)
     _validate_option_values("rsync-option", options.rsync_options)
+    _validate_remote_env(options.remote_env)
 
     local_dir = options.local_dir or _default_local_dir(project.config.name)
     local_bundle = local_dir / "bundle"
@@ -176,6 +192,7 @@ def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> Remote
         "ssh",
         *_ssh_option_args(options.ssh_options),
         options.host,
+        *options.remote_env,
         options.remote_auto_video,
         "worker",
         "run",
