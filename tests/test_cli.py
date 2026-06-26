@@ -35,3 +35,9 @@ def test_cli_mock_generate_then_probe(tmp_path: Path):
     assert main(["generate", str(project), "--provider", "mock"]) == 0
     assert (project / "manifest.json").exists()
     assert main(["probe", str(project), "--dry-run"]) == 0
+
+
+def test_checked_in_example_validates():
+    assert main(["validate", "examples/demo_project"]) == 0
+    assert main(["images", "examples/demo_project", "--dry-run"]) == 0
+    assert main(["generate", "examples/demo_project", "--dry-run"]) == 0

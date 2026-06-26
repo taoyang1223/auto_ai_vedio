@@ -1,0 +1,20 @@
+name: demo_ad
+aspect_ratio: "9:16"
+width: 1080
+height: 1920
+fps: 30
+default_video_provider: mock
+default_image_provider: mock
+default_audio_provider: mock
+render:
+  transition:
+    type: fade
+    duration: 0.6
+  bgm_volume: 0.2
+  subtitle_style: default
+  brand:
+    text: "Demo Brand"
+    at: 1.2
+  cta:
+    text: "Click for more"
+    at: 2.6

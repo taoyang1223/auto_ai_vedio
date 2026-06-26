@@ -1,0 +1,27 @@
+{
+  "shots": [
+    {
+      "id": "S01",
+      "title": "Hook",
+      "duration": 5,
+      "intent": "Show fatigue and introduce the product need",
+      "provider": "mock",
+      "visual_prompt": "A tired person at a cold desk",
+      "camera_motion": "slow_dolly_in",
+      "environment_motion": "screen flicker, dust floats",
+      "performance": "tired breathing, shoulders drop slightly",
+      "lighting": "cold fluorescent light",
+      "audio_intent": "quiet room tone",
+      "subtitle": "Late night again",
+      "negative_prompt": "text, watermark",
+      "refs": [
+        {
+          "path": "assets/refs/S01.txt",
+          "type": "text",
+          "role": "first_frame",
+          "usage": "preserve_subject"
+        }
+      ]
+    }
+  ]
+}
