@@ -88,10 +88,19 @@ Run locally through an SSH tunnel:
 
 ```bash
 ssh -fN -L 8082:127.0.0.1:8082 -p <port> root@<gpu-host>
+WAN_BASE_URL=http://127.0.0.1:8082 python scripts/wan_runtime_doctor.py --base-url-env WAN_BASE_URL --require-i2v
 WAN_BASE_URL=http://127.0.0.1:8082 .venv/bin/python -m auto_video jobs submit demo_project --provider wan_http --kind video
 ```
 
 The adapter calls `/i2v` when a shot has an existing image reference and `/t2v` otherwise. It maps prompt, negative prompt, duration, width, height, fps, steps, guidance scale, and seed into the Wan request body.
+
+Phase 8 adds `scripts/wan_runtime_doctor.py` for checking the Wan service before generation:
+
+```bash
+python scripts/wan_runtime_doctor.py --base-url http://127.0.0.1:8082 --require-i2v --require-t2v
+```
+
+It only calls `GET /health`, prints JSON, and exits 1 if the service is unreachable or the required I2V/T2V model is not loaded.
 
 ## Cloud Worker Contract
 
