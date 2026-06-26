@@ -108,3 +108,35 @@ def test_remote_cli_fake_execution_imports_manifest(tmp_path: Path, monkeypatch,
     assert payload["failed"] == []
     assert (project / "manifest.json").exists()
     assert (project / "generated" / "clips" / "S01.mp4").exists()
+
+
+def test_checked_in_example_remote_dry_run(tmp_path: Path, capsys):
+    local_dir = tmp_path / "example-remote-work"
+
+    assert (
+        main(
+            [
+                "remote",
+                "run",
+                "examples/demo_project",
+                "--provider",
+                "mock",
+                "--kind",
+                "video",
+                "--host",
+                "gpu-box",
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+                "--local-dir",
+                str(local_dir),
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["dry_run"] is True
+    assert payload["commands"]["upload"][0] == "rsync"
+    assert payload["commands"]["run"][0] == "ssh"
+    assert not (Path("examples/demo_project") / "manifest.json").exists()

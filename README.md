@@ -17,6 +17,7 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video worker export demo_project --provider mock --kind video --out /tmp/av-bundle --force
 .venv/bin/python -m auto_video worker run /tmp/av-bundle
 .venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
+.venv/bin/python -m auto_video remote run demo_project --provider mock --kind video --host gpu-box --remote-dir /data/auto-video/jobs/demo --local-dir /tmp/av-remote-demo --dry-run
 .venv/bin/python -m auto_video generate demo_project --provider mock
 .venv/bin/python -m auto_video assemble demo_project --dry-run
 .venv/bin/python -m auto_video probe demo_project --dry-run
@@ -47,6 +48,16 @@ Phase 3 adds a portable worker bundle workflow:
     .venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
 
 The first worker is local and deterministic. It proves the export/run/import contract without needing a GPU, cloud account, object storage, FFmpeg, or API key. A future cloud transport only needs to move the bundle to a rented GPU machine, run the same worker command, and bring the result bundle back.
+
+## SSH Remote Worker Transport
+
+Phase 4 adds a thin SSH/rsync transport around worker bundles:
+
+    .venv/bin/python -m auto_video remote run demo_project --provider mock --kind video --host gpu-box --remote-dir /data/auto-video/jobs/demo --local-dir /tmp/av-remote-demo --dry-run
+
+Without `--dry-run`, the command exports a local worker bundle, uploads it with `rsync`, runs `auto-video worker run` over `ssh`, downloads the updated bundle, and imports the result into the local project manifest.
+
+The remote host must already have SSH access, `rsync`, a working `auto-video` command, and any provider runtime or GPU dependencies required by the selected provider. Phase 4 does not create cloud machines or install GPU runtimes.
 
 ## Prototype Migration
 
