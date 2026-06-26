@@ -125,6 +125,33 @@ The remote Wan doctor now defaults to `python -m auto_video.wan_runtime_doctor`,
   --remote-env WAN_BASE_URL=http://127.0.0.1:8082
 ```
 
+## Rented GPU Wan Runbook
+
+Phase 11 adds a runbook planner for the real cloud GPU workflow. It does not rent machines or run SSH commands; it prints the copyable install, preflight, generation, and shutdown steps:
+
+```bash
+.venv/bin/python -m auto_video.wan_gpu_runbook \
+  --project demo_project \
+  --host gpu-box \
+  --remote-dir /data/auto-video/jobs/demo \
+  --format markdown
+```
+
+By default the runbook installs this repo into `/opt/auto-ai-video/.venv` on the GPU host, uses `/opt/auto-ai-video/.venv/bin/auto-video` for remote worker checks, and points the remote worker at `WAN_BASE_URL=http://127.0.0.1:8082`. This follows the old project lesson: put the job on the GPU host and let it call the local Wan HTTP service instead of depending on a fragile long-lived SSH tunnel.
+
+If your Wan server has a known launch command, include it in the plan:
+
+```bash
+.venv/bin/python -m auto_video.wan_gpu_runbook \
+  --project demo_project \
+  --host gpu-box \
+  --remote-dir /data/auto-video/jobs/demo \
+  --wan-start-command 'nohup /root/miniconda3/bin/python3 /root/wan_server.py --mode i2v --offload none --port 8082 > /tmp/wan_server.log 2>&1 &' \
+  --format markdown
+```
+
+After reviewing the runbook, run the preflight commands first, then the generated `remote_run` command. Shut down or release the GPU machine after outputs are imported locally.
+
 ## Cloud Worker Contract
 
 Phase 3 adds a portable worker bundle workflow:

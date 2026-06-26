@@ -93,6 +93,10 @@ def _commands(options: WanRemoteSmokeOptions) -> dict[str, tuple[str, ...]]:
         options.host,
         "--remote-dir",
         options.remote_dir,
+        *_optional(
+            "--remote-auto-video",
+            options.remote_auto_video if options.remote_auto_video != "auto-video" else None,
+        ),
         *_repeat_options("--ssh-option", options.ssh_options),
     )
     wan_runtime_doctor = (
