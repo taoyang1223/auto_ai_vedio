@@ -2,17 +2,49 @@ from __future__ import annotations
 
 from typing import Any
 
-from .manifest import ManifestStore
-from .models import AssetResult, GenerationTask, Project
-from .prompts import plan_prompt
+from .job_builder import build_jobs
+from .job_store import JobStore
+from .jobs import ProviderResult
+from .models import AssetResult, Project
 from .providers import get_provider
 
 
-def _select_shots(project: Project, only: set[str] | None = None):
-    for shot in project.shots:
-        if only and shot.id not in only:
-            continue
-        yield shot
+def _plan_payload(jobs) -> dict[str, Any]:
+    return {"dry_run": True, "planned": [job.to_dict() for job in jobs]}
+
+
+def plan_jobs(
+    project: Project,
+    *,
+    kind: str,
+    provider_name: str | None = None,
+    only: set[str] | None = None,
+) -> dict[str, Any]:
+    return _plan_payload(build_jobs(project, kind=kind, provider_name=provider_name, only=only))
+
+
+def submit_jobs(
+    project: Project,
+    *,
+    kind: str,
+    provider_name: str | None = None,
+    only: set[str] | None = None,
+) -> list[ProviderResult]:
+    jobs = build_jobs(project, kind=kind, provider_name=provider_name, only=only)
+    store = JobStore(project.config.root / "manifest.json", project_name=project.config.name)
+    results: list[ProviderResult] = []
+    for job in jobs:
+        provider = get_provider(job.provider)
+        store.record_job(job)
+        result = provider.execute_job(job, project.config.root)
+        store.record_result(result)
+        results.append(result)
+    store.save()
+    return results
+
+
+def _asset_results(results: list[ProviderResult]) -> list[AssetResult]:
+    return [result.to_asset_result() for result in results]
 
 
 def generate_images(
@@ -22,24 +54,9 @@ def generate_images(
     dry_run: bool = False,
     only: set[str] | None = None,
 ) -> dict[str, Any] | list[AssetResult]:
-    provider_name = provider_name or project.config.default_image_provider
-    provider = get_provider(provider_name)
-    planned: list[dict[str, str]] = []
-    results: list[AssetResult] = []
-    store = ManifestStore(project.config.root / "manifest.json", project_name=project.config.name)
-    for shot in _select_shots(project, only):
-        output = project.config.root / "generated" / "images" / f"{shot.id}.txt"
-        prompt = plan_prompt(shot, provider=provider_name)
-        if dry_run:
-            planned.append({"shot_id": shot.id, "provider": provider_name, "output": output.as_posix()})
-            continue
-        result = provider.generate_image(GenerationTask(project.config, shot, prompt, output, dry_run=False))
-        store.record_asset(result)
-        results.append(result)
     if dry_run:
-        return {"dry_run": True, "planned": planned}
-    store.save()
-    return results
+        return plan_jobs(project, kind="image", provider_name=provider_name, only=only)
+    return _asset_results(submit_jobs(project, kind="image", provider_name=provider_name, only=only))
 
 
 def generate_videos(
@@ -49,21 +66,6 @@ def generate_videos(
     dry_run: bool = False,
     only: set[str] | None = None,
 ) -> dict[str, Any] | list[AssetResult]:
-    provider_name = provider_name or project.config.default_video_provider
-    provider = get_provider(provider_name)
-    planned: list[dict[str, str]] = []
-    results: list[AssetResult] = []
-    store = ManifestStore(project.config.root / "manifest.json", project_name=project.config.name)
-    for shot in _select_shots(project, only):
-        output = project.config.root / "generated" / "clips" / f"{shot.id}.mp4"
-        prompt = plan_prompt(shot, provider=provider_name)
-        if dry_run:
-            planned.append({"shot_id": shot.id, "provider": provider_name, "output": output.as_posix()})
-            continue
-        result = provider.generate_video(GenerationTask(project.config, shot, prompt, output, dry_run=False))
-        store.record_asset(result)
-        results.append(result)
     if dry_run:
-        return {"dry_run": True, "planned": planned}
-    store.save()
-    return results
+        return plan_jobs(project, kind="video", provider_name=provider_name, only=only)
+    return _asset_results(submit_jobs(project, kind="video", provider_name=provider_name, only=only))
