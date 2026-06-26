@@ -20,12 +20,14 @@ class ManifestStore:
                 "assets": {},
                 "shots": {},
                 "renders": {},
+                "jobs": {},
             }
         self.data.setdefault("project", project_name)
         self.data.setdefault("schema_version", "0.1")
         self.data.setdefault("assets", {})
         self.data.setdefault("shots", {})
         self.data.setdefault("renders", {})
+        self.data.setdefault("jobs", {})
 
     def _relative(self, value: Path) -> str:
         try:
