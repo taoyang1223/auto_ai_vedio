@@ -11,6 +11,7 @@ from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project
 from .render import build_render_plan
+from .remote_transport import RemoteRunOptions, run_remote_worker
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
@@ -152,6 +153,22 @@ def build_parser() -> argparse.ArgumentParser:
     worker_import.add_argument("project")
     worker_import.add_argument("bundle")
 
+    remote = sub.add_parser("remote")
+    remote_sub = remote.add_subparsers(dest="remote_command")
+
+    remote_run = remote_sub.add_parser("run")
+    remote_run.add_argument("project")
+    remote_run.add_argument("--host", required=True)
+    remote_run.add_argument("--remote-dir", required=True)
+    remote_run.add_argument("--provider")
+    remote_run.add_argument("--kind", choices=["image", "video", "audio"], default="video")
+    remote_run.add_argument("--only")
+    remote_run.add_argument("--local-dir")
+    remote_run.add_argument("--remote-auto-video", default="auto-video")
+    remote_run.add_argument("--ssh-option", action="append", default=[])
+    remote_run.add_argument("--rsync-option", action="append", default=[])
+    remote_run.add_argument("--dry-run", action="store_true")
+
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
@@ -250,6 +267,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "worker" and args.worker_command == "import":
             result = import_worker_results(Path(args.project), Path(args.bundle))
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "remote" and args.remote_command == "run":
+            project = load_project(args.project)
+            result = run_remote_worker(
+                project,
+                RemoteRunOptions(
+                    host=args.host,
+                    remote_dir=args.remote_dir,
+                    provider_name=args.provider,
+                    kind=args.kind,
+                    only=_csv(args.only),
+                    local_dir=Path(args.local_dir) if args.local_dir else None,
+                    remote_auto_video=args.remote_auto_video,
+                    ssh_options=tuple(args.ssh_option),
+                    rsync_options=tuple(args.rsync_option),
+                ),
+                dry_run=args.dry_run,
+            )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "providers" and args.providers_command == "health":
