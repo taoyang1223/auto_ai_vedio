@@ -34,3 +34,12 @@ def test_worker_cli_export_existing_bundle_requires_force(tmp_path: Path):
 
     assert main(["worker", "export", str(project), "--provider", "mock", "--kind", "video", "--out", str(bundle)]) == 1
     assert main(["worker", "export", str(project), "--provider", "mock", "--kind", "video", "--out", str(bundle), "--force"]) == 0
+
+
+def test_checked_in_example_worker_export(tmp_path: Path):
+    bundle = tmp_path / "example-bundle"
+
+    assert main(["worker", "export", "examples/demo_project", "--provider", "mock", "--kind", "video", "--out", str(bundle)]) == 0
+
+    assert (bundle / "bundle.json").exists()
+    assert not (Path("examples/demo_project") / "manifest.json").exists()

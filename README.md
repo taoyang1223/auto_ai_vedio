@@ -14,6 +14,9 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video jobs plan demo_project --provider mock --kind video
 .venv/bin/python -m auto_video jobs submit demo_project --provider mock --kind video
 .venv/bin/python -m auto_video jobs status demo_project
+.venv/bin/python -m auto_video worker export demo_project --provider mock --kind video --out /tmp/av-bundle --force
+.venv/bin/python -m auto_video worker run /tmp/av-bundle
+.venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
 .venv/bin/python -m auto_video generate demo_project --provider mock
 .venv/bin/python -m auto_video assemble demo_project --dry-run
 .venv/bin/python -m auto_video probe demo_project --dry-run
@@ -34,6 +37,16 @@ Phase 2 routes generation through provider-neutral jobs:
 `jobs plan` prints deterministic job records without writing `manifest.json`.
 `jobs submit` executes the selected provider and records both legacy shot assets and provider job records in `manifest.json`.
 The mock provider stays offline and deterministic, so tests do not need API keys, network, FFmpeg, or cloud GPU access.
+
+## Cloud Worker Contract
+
+Phase 3 adds a portable worker bundle workflow:
+
+    .venv/bin/python -m auto_video worker export demo_project --provider mock --kind video --out /tmp/av-bundle --force
+    .venv/bin/python -m auto_video worker run /tmp/av-bundle
+    .venv/bin/python -m auto_video worker import demo_project /tmp/av-bundle
+
+The first worker is local and deterministic. It proves the export/run/import contract without needing a GPU, cloud account, object storage, FFmpeg, or API key. A future cloud transport only needs to move the bundle to a rented GPU machine, run the same worker command, and bring the result bundle back.
 
 ## Prototype Migration
 
