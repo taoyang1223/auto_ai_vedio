@@ -152,6 +152,46 @@ If your Wan server has a known launch command, include it in the plan:
 
 After reviewing the runbook, run the preflight commands first, then the generated `remote_run` command. Shut down or release the GPU machine after outputs are imported locally.
 
+## AutoDL ComfyUI Wan Adapter
+
+Phase 12 adds a ComfyUI adapter for AutoDL Wan2.2 workflow images such as `wan2.2视频带工作流`. On the tested instance, ComfyUI runs on the GPU host at `http://127.0.0.1:6006`, and the useful image-to-video workflow is:
+
+```text
+/root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+```
+
+Provider config:
+
+```yaml
+default_video_provider: comfyui_wan
+
+providers:
+  comfyui_wan:
+    mode: external_command
+    timeout_seconds: 3600
+    command:
+      - python
+      - -m
+      - auto_video.comfyui_wan_adapter
+      - --base-url-env
+      - COMFYUI_BASE_URL
+      - --workflow-env
+      - COMFYUI_WORKFLOW
+```
+
+Remote run example:
+
+```bash
+.venv/bin/python -m auto_video remote run demo_project --provider comfyui_wan --kind video \
+  --host gpu-box \
+  --remote-dir /data/auto-video/jobs/demo \
+  --remote-auto-video /opt/auto-ai-video/.venv/bin/auto-video \
+  --remote-env COMFYUI_BASE_URL=http://127.0.0.1:6006 \
+  --remote-env 'COMFYUI_WORKFLOW=/root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json'
+```
+
+This adapter currently targets image-to-video jobs. Each shot should include an existing image reference; the adapter uploads that image to ComfyUI, patches the workflow prompt, seed, duration, resolution, frame rate, and output prefix, then downloads the first video output from ComfyUI history.
+
 ## Cloud Worker Contract
 
 Phase 3 adds a portable worker bundle workflow:
