@@ -34,7 +34,7 @@ def submit_jobs(
     store = JobStore(project.config.root / "manifest.json", project_name=project.config.name)
     results: list[ProviderResult] = []
     for job in jobs:
-        provider = get_provider(job.provider)
+        provider = get_provider(job.provider, project.config.providers.get(job.provider))
         store.record_job(job)
         result = provider.execute_job(job, project.config.root)
         store.record_result(result)

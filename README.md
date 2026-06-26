@@ -40,6 +40,30 @@ Phase 2 routes generation through provider-neutral jobs:
 `jobs submit` executes the selected provider and records both legacy shot assets and provider job records in `manifest.json`.
 The mock provider stays offline and deterministic, so tests do not need API keys, network, FFmpeg, or cloud GPU access.
 
+## External Command Providers
+
+Phase 6 adds a model-agnostic bridge for real backends such as Wan, ComfyUI, Seedance API wrappers, or custom GPU scripts:
+
+```yaml
+default_video_provider: local_wan
+
+providers:
+  local_wan:
+    mode: external_command
+    timeout_seconds: 1800
+    command:
+      - python
+      - scripts/wan_adapter.py
+```
+
+`jobs submit --provider local_wan --kind video` writes a Seedance-style job payload, then runs:
+
+    python scripts/wan_adapter.py --job <job-json> --project-root <project-root> --output <output-path>
+
+The adapter reads the JSON payload, translates prompt controls and references into the target model's API, writes the generated asset to `--output`, and exits 0 on success. Non-zero exits and timeouts are recorded as provider job failures in `manifest.json`.
+
+The same provider config works in worker bundles and remote GPU runs when the configured command is available in the worker environment.
+
 ## Cloud Worker Contract
 
 Phase 3 adds a portable worker bundle workflow:

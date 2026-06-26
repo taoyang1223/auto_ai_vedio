@@ -26,7 +26,7 @@ REFERENCE_USAGES = {
     "extract_audio_rhythm",
     "provide_context",
 }
-PROVIDERS = {"mock", "seedream", "seedance", "wan", "slideshow"}
+BUILTIN_PROVIDERS = {"mock", "seedream", "seedance", "wan", "slideshow"}
 
 
 def _require_enum(value: str, allowed: set[str], field_name: str) -> None:
@@ -36,6 +36,16 @@ def _require_enum(value: str, allowed: set[str], field_name: str) -> None:
             f"{field_name} has unsupported value {value!r}; allowed values: {allowed_list}",
             fix=f"Use one of: {allowed_list}.",
         )
+
+
+def _require_provider(value: str, configured: set[str], field_name: str) -> None:
+    if value in BUILTIN_PROVIDERS or value in configured:
+        return
+    allowed_list = ", ".join(sorted(BUILTIN_PROVIDERS | configured))
+    raise ConfigError(
+        f"{field_name} has unsupported provider {value!r}; allowed values: {allowed_list}",
+        fix="Use a built-in provider or add provider config under providers.",
+    )
 
 
 @dataclass(frozen=True)
@@ -98,12 +108,13 @@ class ProjectConfig:
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        configured = set(self.providers)
         for field_name, provider in {
             "default_video_provider": self.default_video_provider,
             "default_image_provider": self.default_image_provider,
             "default_audio_provider": self.default_audio_provider,
         }.items():
-            _require_enum(provider, PROVIDERS, field_name)
+            _require_provider(provider, configured, field_name)
 
 
 @dataclass(frozen=True)
@@ -130,7 +141,8 @@ class ShotPlan:
                 fix="Set duration to a positive number of seconds.",
             )
         if self.provider is not None:
-            _require_enum(self.provider, PROVIDERS, f"shot {self.id} provider")
+            if not self.provider:
+                raise ConfigError(f"shot {self.id} provider cannot be empty", fix="Use a non-empty provider name.")
 
 
 @dataclass(frozen=True)

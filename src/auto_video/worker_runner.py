@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .jobs import ProviderResult
+from .project import load_project
 from .providers import get_provider
 from .worker_bundle import BUNDLE_SCHEMA_VERSION, load_bundle_index, load_bundle_jobs, provider_result_to_dict
 
@@ -15,9 +16,10 @@ def run_worker_bundle(bundle: Path) -> dict[str, Any]:
     (bundle / "logs").mkdir(parents=True, exist_ok=True)
     log_path = bundle / "logs" / "worker.log"
     log_lines = ["started worker bundle run"]
+    project = load_project(bundle)
     results: list[ProviderResult] = []
     for job in load_bundle_jobs(bundle):
-        provider = get_provider(job.provider)
+        provider = get_provider(job.provider, project.config.providers.get(job.provider))
         worker_job = job.__class__(
             **{
                 **job.to_dict(),
