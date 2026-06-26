@@ -166,3 +166,75 @@ def provider_result_to_dict(result: ProviderResult, bundle: Path) -> dict[str, A
         "retryable": result.retryable,
         "metadata": result.metadata,
     }
+
+
+def _result_from_dict(data: dict[str, Any], bundle: Path) -> ProviderResult:
+    path_value = data.get("path")
+    path = _resolve_inside(bundle, str(path_value)) if path_value else None
+    return ProviderResult(
+        job_id=str(data["job_id"]),
+        shot_id=str(data["shot_id"]),
+        kind=str(data["kind"]),
+        provider=str(data["provider"]),
+        status=str(data["status"]),
+        path=path,
+        duration=float(data["duration"]) if data.get("duration") is not None else None,
+        provider_job_id=data.get("provider_job_id"),
+        error=data.get("error"),
+        retryable=bool(data.get("retryable", False)),
+        metadata=dict(data.get("metadata", {})),
+    )
+
+
+def _project_output_path(project_root: Path, bundle: Path, result: ProviderResult) -> Path | None:
+    if result.path is None:
+        return None
+    relative_to_bundle = result.path.resolve().relative_to(bundle.resolve())
+    if not relative_to_bundle.parts or relative_to_bundle.parts[0] != "outputs":
+        raise AssetError(
+            f"result path {relative_to_bundle} is not inside bundle outputs",
+            fix="Use worker result paths under outputs/.",
+        )
+    project_relative = Path(*relative_to_bundle.parts[1:])
+    return resolve_project_path(project_root, project_relative.as_posix())
+
+
+def import_worker_results(project_root: Path, bundle: Path) -> dict[str, list[str]]:
+    result_path = bundle / "result.json"
+    if not result_path.exists():
+        raise ConfigError(f"missing {result_path}", fix="Run worker run before worker import.")
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+
+    from .job_store import JobStore
+    from .project import load_project
+
+    project = load_project(project_root)
+    store = JobStore(project.config.root / "manifest.json", project_name=project.config.name)
+    imported: list[str] = []
+    failed: list[str] = []
+    for item in payload.get("results", []):
+        result = _result_from_dict(item, bundle)
+        if result.status == "succeeded" and result.path is not None:
+            destination = _project_output_path(project.config.root, bundle, result)
+            assert destination is not None
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(result.path, destination)
+            result = ProviderResult(
+                job_id=result.job_id,
+                shot_id=result.shot_id,
+                kind=result.kind,
+                provider=result.provider,
+                status=result.status,
+                path=destination,
+                duration=result.duration,
+                provider_job_id=result.provider_job_id,
+                error=result.error,
+                retryable=result.retryable,
+                metadata=result.metadata,
+            )
+            imported.append(result.job_id)
+        else:
+            failed.append(result.job_id)
+        store.record_result(result)
+    store.save()
+    return {"imported": imported, "failed": failed}
