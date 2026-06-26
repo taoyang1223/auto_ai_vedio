@@ -5,13 +5,15 @@ Seedance-inspired AI video production CLI pipeline.
 ## MVP Workflow
 
 ```bash
-python3 -m auto_video init demo_project
-python3 -m auto_video validate demo_project
-python3 -m auto_video images demo_project --dry-run
-python3 -m auto_video generate demo_project --dry-run
-python3 -m auto_video generate demo_project --provider mock
-python3 -m auto_video assemble demo_project --dry-run
-python3 -m auto_video probe demo_project --dry-run
+python3 -m venv .venv
+.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m auto_video init demo_project
+.venv/bin/python -m auto_video validate demo_project
+.venv/bin/python -m auto_video images demo_project --dry-run
+.venv/bin/python -m auto_video generate demo_project --dry-run
+.venv/bin/python -m auto_video generate demo_project --provider mock
+.venv/bin/python -m auto_video assemble demo_project --dry-run
+.venv/bin/python -m auto_video probe demo_project --dry-run
 ```
 
 ## Design
