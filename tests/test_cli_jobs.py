@@ -31,3 +31,9 @@ def test_cli_jobs_submit_and_status(tmp_path: Path, capsys):
 
     assert payload["total"] == 1
     assert payload["by_status"]["succeeded"] == 1
+
+
+def test_checked_in_example_job_workflow(capsys):
+    assert main(["jobs", "plan", "examples/demo_project", "--provider", "mock", "--kind", "video"]) == 0
+    plan_output = json.loads(capsys.readouterr().out)
+    assert plan_output["planned"][0]["id"] == "demo_ad:S01:video:mock"
