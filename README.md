@@ -64,6 +64,35 @@ The adapter reads the JSON payload, translates prompt controls and references in
 
 The same provider config works in worker bundles and remote GPU runs when the configured command is available in the worker environment.
 
+## Wan HTTP Adapter
+
+Phase 7 includes `scripts/wan_http_adapter.py` for Wan HTTP services compatible with the old `/root/ai_vedio/tools/providers/wan.py` contract:
+
+```yaml
+default_video_provider: wan_http
+
+providers:
+  wan_http:
+    mode: external_command
+    timeout_seconds: 1800
+    command:
+      - python
+      - scripts/wan_http_adapter.py
+      - --base-url-env
+      - WAN_BASE_URL
+      - --token-env
+      - WAN_TOKEN
+```
+
+Run locally through an SSH tunnel:
+
+```bash
+ssh -fN -L 8082:127.0.0.1:8082 -p <port> root@<gpu-host>
+WAN_BASE_URL=http://127.0.0.1:8082 .venv/bin/python -m auto_video jobs submit demo_project --provider wan_http --kind video
+```
+
+The adapter calls `/i2v` when a shot has an existing image reference and `/t2v` otherwise. It maps prompt, negative prompt, duration, width, height, fps, steps, guidance scale, and seed into the Wan request body.
+
 ## Cloud Worker Contract
 
 Phase 3 adds a portable worker bundle workflow:
