@@ -7,7 +7,7 @@ from typing import Any
 
 from .errors import AssetError, ConfigError
 from .job_builder import build_jobs
-from .jobs import GenerationJob, utc_now_iso
+from .jobs import GenerationJob, ProviderResult, utc_now_iso
 from .models import Project
 from .project import resolve_project_path
 
@@ -125,3 +125,44 @@ def _resolve_inside(root: Path, value: str) -> Path:
     if candidate != root and root not in candidate.parents:
         raise AssetError(f"path {value!r} escapes bundle root", fix="Remove '..' path traversal.")
     return candidate
+
+
+def load_bundle_index(bundle: Path) -> dict[str, Any]:
+    path = bundle / "bundle.json"
+    if not path.exists():
+        raise ConfigError(f"missing {path}", fix="Run worker export before worker run.")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema_version") != BUNDLE_SCHEMA_VERSION:
+        raise ConfigError(
+            f"unsupported bundle schema {data.get('schema_version')!r}",
+            fix=f"Use schema version {BUNDLE_SCHEMA_VERSION}.",
+        )
+    return data
+
+
+def load_bundle_jobs(bundle: Path) -> list[GenerationJob]:
+    index = load_bundle_index(bundle)
+    jobs: list[GenerationJob] = []
+    for item in index.get("jobs", []):
+        path = _resolve_inside(bundle, str(item))
+        jobs.append(GenerationJob.from_dict(json.loads(path.read_text(encoding="utf-8"))))
+    return jobs
+
+
+def provider_result_to_dict(result: ProviderResult, bundle: Path) -> dict[str, Any]:
+    path = None
+    if result.path is not None:
+        path = _relative(result.path, bundle)
+    return {
+        "job_id": result.job_id,
+        "shot_id": result.shot_id,
+        "kind": result.kind,
+        "provider": result.provider,
+        "status": result.status,
+        "path": path,
+        "duration": result.duration,
+        "provider_job_id": result.provider_job_id,
+        "error": result.error,
+        "retryable": result.retryable,
+        "metadata": result.metadata,
+    }
