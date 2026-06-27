@@ -1,6 +1,9 @@
 import json
+import shutil
 
-from auto_video.first_frame_generation import generate_first_frames
+import pytest
+
+from auto_video.first_frame_generation import _placeholder_png, generate_first_frames, promote_generated_images_to_first_frames
 from auto_video.job_builder import build_jobs
 from auto_video.project import load_project
 
@@ -63,3 +66,22 @@ def test_generate_first_frames_promotes_mock_output_to_png_ref(demo_project_file
     assert manifest["shots"]["S01"]["image"] == "generated/images/S01.png"
     assert reloaded.shots[0].refs[0].path == "assets/refs/S01_first_frame.png"
     assert reloaded.shots[0].refs[0].type == "image"
+
+
+def test_promoted_generated_image_is_normalized_to_project_size(demo_project_files):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg is required for image normalization")
+    generated = demo_project_files / "generated" / "images" / "S01.png"
+    generated.parent.mkdir(parents=True, exist_ok=True)
+    generated.write_bytes(_placeholder_png(3132, 2048, seed="wide-source"))
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps({"shots": {"S01": {"image": "generated/images/S01.png"}}}, indent=2),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    result = promote_generated_images_to_first_frames(project, only={"S01"})
+
+    output = demo_project_files / "assets" / "refs" / "S01_first_frame.png"
+    assert result["promoted"][0]["normalized"] is True
+    assert _png_size(output) == (1080, 1920)

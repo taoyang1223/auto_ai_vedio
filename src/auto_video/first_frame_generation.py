@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import struct
 import zlib
 from pathlib import Path
@@ -63,9 +64,17 @@ def promote_generated_images_to_first_frames(project: Project, *, only: set[str]
         target_relative = _first_frame_relative_path(shot.id, source)
         target = resolve_project_path(project.config.root, target_relative)
         target.parent.mkdir(parents=True, exist_ok=True)
+        normalized = False
         if source.suffix.lower() in IMAGE_SUFFIXES:
             if source.resolve() != target.resolve():
-                shutil.copy2(source, target)
+                normalized = _normalize_image_for_project(
+                    source,
+                    target,
+                    width=max(64, int(project.config.width)),
+                    height=max(64, int(project.config.height)),
+                )
+                if not normalized:
+                    shutil.copy2(source, target)
         else:
             body = _placeholder_png(
                 max(64, int(project.config.width)),
@@ -73,6 +82,7 @@ def promote_generated_images_to_first_frames(project: Project, *, only: set[str]
                 seed=f"{shot.id}:{source.read_bytes().hex()[:96]}",
             )
             target.write_bytes(body)
+            normalized = True
         _set_first_frame_ref(project.config.root, shot.id, target_relative)
         promoted.append(
             {
@@ -80,6 +90,7 @@ def promote_generated_images_to_first_frames(project: Project, *, only: set[str]
                 "source": image_path,
                 "path": target_relative,
                 "bytes": target.stat().st_size,
+                "normalized": normalized,
             }
         )
 
@@ -133,6 +144,34 @@ def _first_frame_relative_path(shot_id: str, source: Path) -> str:
 def _safe_name(value: str) -> str:
     safe = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value).strip("_")
     return safe or "shot"
+
+
+def _normalize_image_for_project(source: Path, target: Path, *, width: int, height: int) -> bool:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    tmp = target.with_name(f".{target.stem}.normalizing{target.suffix or '.png'}")
+    tmp.unlink(missing_ok=True)
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        source.as_posix(),
+        "-vf",
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1",
+        "-frames:v",
+        "1",
+        tmp.as_posix(),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(target)
+    return True
 
 
 def _placeholder_png(width: int, height: int, *, seed: str) -> bytes:
