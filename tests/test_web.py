@@ -130,6 +130,17 @@ def write_comfy_workflow(path):
     path.write_text(json.dumps(workflow, ensure_ascii=False), encoding="utf-8")
 
 
+def write_comfy_image_workflow(path):
+    workflow = {
+        "3": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 4, "cfg": 1}},
+        "118": {"class_type": "CR SDXL Aspect Ratio", "inputs": {"width": 512, "height": 512}},
+        "187": {"class_type": "CLIPTextEncode", "inputs": {"text": "prompt"}},
+        "437": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}},
+        "499": {"class_type": "SaveImage", "inputs": {"filename_prefix": "demo"}},
+    }
+    path.write_text(json.dumps(workflow, ensure_ascii=False), encoding="utf-8")
+
+
 def append_comfy_workflow(project_root, *, base_url, workflow_path):
     with (project_root / "project.yaml").open("a", encoding="utf-8") as handle:
         handle.write(
@@ -139,6 +150,21 @@ comfyui_workflows:
     title: Local I2V
     provider: comfyui_wan
     kind: image_to_video
+    base_url: {base_url}
+    workflow_path: {workflow_path.as_posix()}
+"""
+        )
+
+
+def append_comfy_image_workflow(project_root, *, base_url, workflow_path):
+    with (project_root / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"""
+comfyui_workflows:
+  local_t2i:
+    title: Local T2I
+    provider: comfyui_image
+    kind: text_to_image
     base_url: {base_url}
     workflow_path: {workflow_path.as_posix()}
 """
@@ -176,7 +202,8 @@ def test_web_api_creates_project_and_plans_jobs(tmp_path):
 
     assert created["ok"] is True
     assert listed["projects"][0]["name"] == "wan_story"
-    assert detail["project"]["workflows_detail"][0]["name"] == "wan2_2_smoothmix_i2v"
+    workflow_names = {workflow["name"] for workflow in detail["project"]["workflows_detail"]}
+    assert {"qwen2512_first_frame", "wan2_2_smoothmix_i2v"}.issubset(workflow_names)
     assert validated["ok"] is True
     assert planned["result"]["planned"][0]["provider"] == "comfyui_wan"
 
@@ -234,6 +261,28 @@ def test_web_checks_comfyui_workflow(tmp_path):
     assert comfyui.records == ["/system_stats", "/queue"]
 
 
+def test_web_checks_comfyui_image_workflow(tmp_path):
+    project_root = tmp_path / "demo"
+    workflow = tmp_path / "image-workflow.json"
+    init_project(project_root, template_name="demo")
+    write_comfy_image_workflow(workflow)
+
+    with FakeComfyUIServer() as comfyui:
+        append_comfy_image_workflow(project_root, base_url=comfyui.url, workflow_path=workflow)
+        with running_web(tmp_path) as base_url:
+            payload = request_json(
+                base_url,
+                "/api/projects/demo/workflow-check",
+                method="POST",
+                payload={"profile": "local_t2i", "kind": "text_to_image", "require_gpu": True},
+            )
+
+    result = payload["result"]
+    assert result["ok"] is True
+    workflow_check = next(check for check in result["checks"] if check["name"] == "workflow")
+    assert workflow_check["details"]["required"]["width"] == ["118", "width"]
+
+
 def test_web_updates_comfyui_workflow_settings(tmp_path):
     workflow = {
         "218": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}},
@@ -270,7 +319,10 @@ def test_web_updates_comfyui_workflow_settings(tmp_path):
     provider_env = project.config.providers["comfyui_wan"].options["env"]
     remote_env = project.config.remote_profiles["autodl_5090"]["remote_env"]
 
-    assert payload["project"]["workflows_detail"][0]["base_url"] == "http://127.0.0.1:7000"
+    saved_workflow = next(
+        workflow for workflow in payload["project"]["workflows_detail"] if workflow["name"] == "wan2_2_smoothmix_i2v"
+    )
+    assert saved_workflow["base_url"] == "http://127.0.0.1:7000"
     assert workflow_config["workflow_path"] == "workflows/wan_api.json"
     assert (tmp_path / "wan_story" / "workflows" / "wan_api.json").exists()
     assert provider_env["COMFYUI_BASE_URL"] == "http://127.0.0.1:7000"

@@ -94,7 +94,7 @@ width: 832
 height: 544
 fps: 16
 default_video_provider: comfyui_wan
-default_image_provider: mock
+default_image_provider: comfyui_image
 default_audio_provider: mock
 prompt_profile:
   subject: 专注的 AI 视频创作者与自动化影像工作台
@@ -113,6 +113,26 @@ render:
   bgm_volume: 0.18
   subtitle_style: clean
 providers:
+  comfyui_image:
+    mode: external_command
+    timeout_seconds: 1800
+    max_attempts: 1
+    command:
+      - python
+      - -m
+      - auto_video.comfyui_image_adapter
+      - --base-url-env
+      - COMFYUI_IMAGE_BASE_URL
+      - --workflow-env
+      - COMFYUI_IMAGE_WORKFLOW
+      - --workflow-profile-env
+      - COMFYUI_IMAGE_WORKFLOW_PROFILE
+      - --timeout
+      - "1200"
+      - --seed
+      - "42"
+      - --steps
+      - "8"
   comfyui_wan:
     mode: external_command
     timeout_seconds: 3600
@@ -134,6 +154,54 @@ providers:
       - --steps
       - "20"
 comfyui_workflows:
+  qwen2512_first_frame:
+    title: Qwen2512 first-frame text-to-image
+    provider: comfyui_image
+    kind: text_to_image
+    base_url: http://127.0.0.1:6006
+    base_url_env: COMFYUI_IMAGE_BASE_URL
+    workflow_env: COMFYUI_IMAGE_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/A01-文生图-Qwen2512高清放大.json
+    profile_env: COMFYUI_IMAGE_WORKFLOW_PROFILE
+    tags:
+      - qwen2512
+      - text-to-image
+      - first-frame
+      - autodl
+      - rtx5090
+    models:
+      image: Qwen Image 2512
+      trainer_image: A01-文生图-Qwen2512高清放大
+    recommended_gpu:
+      name: RTX 5090
+      vram_gb: 32
+      count: 1
+    parameters:
+      seed: 42
+      steps: 8
+      guidance_scale: 1
+    nodes:
+      prompt:
+        id: "187"
+        input: text
+      negative:
+        id: "437"
+        input: text
+      seed:
+        id: "3"
+        input: seed
+      size:
+        id: "118"
+        width_input: width
+        height_input: height
+      output:
+        id: "499"
+        filename_prefix_input: filename_prefix
+      steps:
+        ids:
+          - "3"
+        steps_input: steps
+        cfg_input: cfg
   wan2_2_smoothmix_i2v:
     title: Wan2.2 SmoothMix image-to-video
     provider: comfyui_wan
@@ -197,6 +265,9 @@ remote_profiles:
       - "Port=<ssh-port>"
     remote_env:
       PATH: /opt/auto-ai-video/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      COMFYUI_IMAGE_BASE_URL: http://127.0.0.1:6006
+      COMFYUI_IMAGE_WORKFLOW: /root/zealman-app/workflows/A01-文生图-Qwen2512高清放大.json
+      COMFYUI_IMAGE_WORKFLOW_PROFILE: qwen2512_first_frame
       COMFYUI_BASE_URL: http://127.0.0.1:6006
       COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
       COMFYUI_WORKFLOW_PROFILE: wan2_2_smoothmix_i2v
@@ -283,7 +354,7 @@ AutoDL ComfyUI Wan starter project for `auto-video`.
 
 ## Before running
 
-1. Replace the placeholder PNG files in `assets/refs/` with real first-frame images.
+1. Use the first-frame panel to generate or replace the placeholder PNG files in `assets/refs/`.
 2. Edit `project.yaml` and replace `<autodl-host>` and `<ssh-port>` in `remote_profiles.autodl_5090`.
 3. Confirm the workflow path in `COMFYUI_WORKFLOW` matches the workflow on the GPU instance.
 4. Start ComfyUI on AutoDL and make sure `http://127.0.0.1:6006` is reachable from the GPU host.
@@ -294,6 +365,8 @@ AutoDL ComfyUI Wan starter project for `auto-video`.
 auto-video validate .
 auto-video workflows list .
 auto-video workflows show . wan2_2_smoothmix_i2v
+auto-video workflows show . qwen2512_first_frame
+auto-video remote run . --profile autodl_5090 --provider comfyui_image --kind image
 auto-video remote profiles .
 auto-video remote run . --profile autodl_5090 --provider comfyui_wan --kind video
 auto-video probe . --strict

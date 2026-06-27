@@ -2098,11 +2098,11 @@ function WorkflowPanel() {
   if (!detail) return null;
   const projectName = detail.name;
 
-  async function check(profile: string) {
+  async function check(profile: string, kind: string) {
     setChecking(profile);
     setErrors((current) => ({ ...current, [profile]: "" }));
     try {
-      const result = await checkComfyWorkflow(projectName, profile);
+      const result = await checkComfyWorkflow(projectName, profile, kind);
       setResults((current) => ({ ...current, [profile]: result }));
     } catch (error) {
       setErrors((current) => ({ ...current, [profile]: friendlyError(error) }));
@@ -2119,7 +2119,7 @@ function WorkflowPanel() {
             key={workflow.name}
             checking={checking === workflow.name}
             error={errors[workflow.name]}
-            onCheck={() => check(workflow.name)}
+            onCheck={() => check(workflow.name, workflow.kind)}
             result={results[workflow.name]}
             workflow={workflow}
           />
@@ -2821,6 +2821,8 @@ function templateLabel(value: string) {
 }
 
 function workflowKindLabel(value: string) {
+  if (value === "text_to_image") return "文生首帧";
+  if (value === "image") return "图像生成";
   if (value === "image_to_video") return "图生视频";
   if (value === "text_to_video") return "文生视频";
   if (value === "video_to_video") return "视频重绘";

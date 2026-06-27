@@ -171,9 +171,10 @@ export async function uploadFirstFrame(name: string, shotId: string, file: File)
   return data.project;
 }
 
-export async function checkComfyWorkflow(name: string, profile: string): Promise<ComfyCheck> {
+export async function checkComfyWorkflow(name: string, profile: string, kind?: string): Promise<ComfyCheck> {
   const { data } = await client.post<ApiEnvelope<{ result: ComfyCheck }>>(`/api/projects/${encodeURIComponent(name)}/workflow-check`, {
     profile,
+    kind,
     require_idle: false,
     require_gpu: true
   });

@@ -22,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url-env")
     parser.add_argument("--workflow")
     parser.add_argument("--workflow-env")
+    parser.add_argument("--mode", choices=["wan_video", "image"], default="wan_video")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--require-gpu", action="store_true")
     parser.add_argument("--require-idle", action="store_true")
@@ -37,6 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--duration-input", default="value")
     parser.add_argument("--resolution-node", default="248")
     parser.add_argument("--resolution-input", default="value")
+    parser.add_argument("--size-node", default="118")
+    parser.add_argument("--width-input", default="width")
+    parser.add_argument("--height-input", default="height")
+    parser.add_argument("--output-node", default="499")
     parser.add_argument("--video-node", default="230")
     parser.add_argument("--frame-rate-input", default="frame_rate")
     parser.add_argument("--filename-prefix-input", default="filename_prefix")
@@ -191,7 +196,7 @@ def _workflow_check(path: Path, args: argparse.Namespace) -> dict[str, Any]:
             missing.append(f"{label}: node {node} input {input_name}")
 
     optional_missing: list[str] = []
-    for node in args.steps_node:
+    for node in _steps_nodes(args):
         inputs = workflow.get(str(node), {}).get("inputs")
         if not isinstance(inputs, dict):
             optional_missing.append(f"steps node {node}")
@@ -210,7 +215,7 @@ def _workflow_check(path: Path, args: argparse.Namespace) -> dict[str, Any]:
             "workflow",
             "failed",
             "workflow is missing required adapter nodes or inputs",
-            fix="Pass matching --*-node/--*-input options or choose the Wan2.2 image-to-video API workflow.",
+            fix="Pass matching --*-node/--*-input options or choose the matching ComfyUI API workflow.",
             details={**details, "missing": missing},
         )
     if optional_missing:
@@ -220,10 +225,19 @@ def _workflow_check(path: Path, args: argparse.Namespace) -> dict[str, Any]:
             "workflow is usable, but some optional steps/cfg inputs were not found",
             details=details,
         )
-    return _check("workflow", "ok", "workflow contains required ComfyUI Wan adapter nodes", details=details)
+    return _check("workflow", "ok", "workflow contains required ComfyUI adapter nodes", details=details)
 
 
 def _required_inputs(args: argparse.Namespace) -> dict[str, tuple[str, str]]:
+    if args.mode == "image":
+        return {
+            "prompt": (_image_default(args.prompt_node, "257", "187"), _image_default(args.prompt_input, "value", "text")),
+            "negative": (_image_default(args.negative_node, "218", "437"), args.negative_input),
+            "seed": (_image_default(args.seed_node, "231", "3"), args.seed_input),
+            "width": (args.size_node, args.width_input),
+            "height": (args.size_node, args.height_input),
+            "image_filename_prefix": (args.output_node, args.filename_prefix_input),
+        }
     return {
         "image": (args.image_node, args.image_input),
         "prompt": (args.prompt_node, args.prompt_input),
@@ -234,6 +248,16 @@ def _required_inputs(args: argparse.Namespace) -> dict[str, tuple[str, str]]:
         "video_frame_rate": (args.video_node, args.frame_rate_input),
         "video_filename_prefix": (args.video_node, args.filename_prefix_input),
     }
+
+
+def _steps_nodes(args: argparse.Namespace) -> list[str]:
+    if args.mode == "image" and args.steps_node == ["228", "229"]:
+        return ["3"]
+    return [str(node) for node in args.steps_node]
+
+
+def _image_default(value: str, wan_default: str, image_default: str) -> str:
+    return image_default if value == wan_default else value
 
 
 def _check(

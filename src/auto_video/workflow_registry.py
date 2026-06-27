@@ -51,11 +51,7 @@ def workflow_env_exports(project: Project, name: str) -> list[str]:
 
 def comfyui_wan_adapter_options(project: Project, name: str) -> dict[str, Any]:
     raw = get_workflow(project, name)
-    options: dict[str, Any] = {}
-    _copy(raw, options, "base_url", "base_url")
-    _copy(raw, options, "base_url_env", "base_url_env")
-    _copy(raw, options, "workflow_path", "workflow")
-    _copy(raw, options, "workflow_env", "workflow_env")
+    options = _base_adapter_options(raw)
 
     parameters = raw.get("parameters") or {}
     if not isinstance(parameters, dict):
@@ -76,6 +72,38 @@ def comfyui_wan_adapter_options(project: Project, name: str) -> dict[str, Any]:
     _node(nodes, options, "resolution", "resolution_node", "resolution_input")
     _video_node(nodes, options)
     _steps_node(nodes, options)
+    return options
+
+
+def comfyui_image_adapter_options(project: Project, name: str) -> dict[str, Any]:
+    raw = get_workflow(project, name)
+    options = _base_adapter_options(raw)
+
+    parameters = raw.get("parameters") or {}
+    if not isinstance(parameters, dict):
+        raise ConfigError(f"workflow {name} parameters must be a mapping", fix="Use key/value parameters.")
+    _copy(parameters, options, "seed", "seed")
+    _copy(parameters, options, "steps", "steps")
+    _copy(parameters, options, "guidance_scale", "guidance_scale")
+
+    nodes = raw.get("nodes") or {}
+    if not isinstance(nodes, dict):
+        raise ConfigError(f"workflow {name} nodes must be a mapping", fix="Use named node mappings.")
+    _node(nodes, options, "prompt", "prompt_node", "prompt_input")
+    _node(nodes, options, "negative", "negative_node", "negative_input")
+    _node(nodes, options, "seed", "seed_node", "seed_input")
+    _size_node(nodes, options)
+    _output_node(nodes, options)
+    _steps_node(nodes, options)
+    return options
+
+
+def _base_adapter_options(raw: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    _copy(raw, options, "base_url", "base_url")
+    _copy(raw, options, "base_url_env", "base_url_env")
+    _copy(raw, options, "workflow_path", "workflow")
+    _copy(raw, options, "workflow_env", "workflow_env")
     return options
 
 
@@ -147,6 +175,32 @@ def _steps_node(nodes: dict[str, Any], options: dict[str, Any]) -> None:
         options["steps_input"] = str(raw["steps_input"])
     if raw.get("cfg_input") is not None:
         options["cfg_input"] = str(raw["cfg_input"])
+
+
+def _size_node(nodes: dict[str, Any], options: dict[str, Any]) -> None:
+    raw = nodes.get("size")
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise ConfigError("workflow node size must be a mapping", fix="Use id, width_input, and height_input fields.")
+    if raw.get("id") is not None:
+        options["size_node"] = str(raw["id"])
+    if raw.get("width_input") is not None:
+        options["width_input"] = str(raw["width_input"])
+    if raw.get("height_input") is not None:
+        options["height_input"] = str(raw["height_input"])
+
+
+def _output_node(nodes: dict[str, Any], options: dict[str, Any]) -> None:
+    raw = nodes.get("output")
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        raise ConfigError("workflow node output must be a mapping", fix="Use id and filename_prefix_input fields.")
+    if raw.get("id") is not None:
+        options["output_node"] = str(raw["id"])
+    if raw.get("filename_prefix_input") is not None:
+        options["filename_prefix_input"] = str(raw["filename_prefix_input"])
 
 
 def _string_list(value: Any) -> list[str]:

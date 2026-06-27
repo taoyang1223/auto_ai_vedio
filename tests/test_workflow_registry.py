@@ -5,6 +5,7 @@ import pytest
 from auto_video.errors import ConfigError
 from auto_video.project import load_project
 from auto_video.workflow_registry import (
+    comfyui_image_adapter_options,
     comfyui_wan_adapter_options,
     list_workflows,
     show_workflow,
@@ -108,6 +109,58 @@ def test_workflow_registry_builds_adapter_options(demo_project_files):
     assert options["frame_rate_input"] == "fps"
     assert options["steps_node"] == ["904", "905"]
     assert options["steps_input"] == "sample_steps"
+
+
+def test_workflow_registry_builds_image_adapter_options(demo_project_files):
+    with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            """
+comfyui_workflows:
+  first_frame_t2i:
+    provider: comfyui_image
+    kind: text_to_image
+    base_url_env: COMFYUI_IMAGE_BASE_URL
+    workflow_env: COMFYUI_IMAGE_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/A01.json
+    parameters:
+      seed: 321
+      steps: 8
+      guidance_scale: 1
+    nodes:
+      prompt:
+        id: "187"
+        input: text
+      negative:
+        id: "437"
+        input: text
+      seed:
+        id: "3"
+        input: seed
+      size:
+        id: "118"
+        width_input: width
+        height_input: height
+      output:
+        id: "499"
+        filename_prefix_input: filename_prefix
+      steps:
+        ids:
+          - "3"
+        steps_input: steps
+        cfg_input: cfg
+""",
+        )
+    project = load_project(demo_project_files)
+
+    options = comfyui_image_adapter_options(project, "first_frame_t2i")
+
+    assert options["workflow"] == "/root/zealman-app/workflows/A01.json"
+    assert options["seed"] == 321
+    assert options["prompt_node"] == "187"
+    assert options["size_node"] == "118"
+    assert options["width_input"] == "width"
+    assert options["output_node"] == "499"
+    assert options["steps_node"] == ["3"]
 
 
 def test_unknown_workflow_profile_is_config_error(demo_project_files):

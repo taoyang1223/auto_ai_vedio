@@ -42,6 +42,8 @@ def test_cli_init_autodl_comfyui_wan_template(tmp_path: Path):
     assert main(["validate", str(project)]) == 0
     assert (project / "README.md").exists()
     project_yaml = (project / "project.yaml").read_text(encoding="utf-8")
+    assert "default_image_provider: comfyui_image" in project_yaml
+    assert "qwen2512_first_frame" in project_yaml
     assert "comfyui_wan" in project_yaml
     assert "wan2_2_smoothmix_i2v" in project_yaml
     assert "prompt_profile:" in project_yaml
@@ -56,11 +58,15 @@ def test_cli_workflows_commands_use_template_registry(tmp_path: Path, capsys):
     assert main(["init", str(project), "--template", "autodl_comfyui_wan"]) == 0
 
     assert main(["workflows", "list", str(project)]) == 0
-    assert "wan2_2_smoothmix_i2v" in capsys.readouterr().out
+    workflows_output = capsys.readouterr().out
+    assert "qwen2512_first_frame" in workflows_output
+    assert "wan2_2_smoothmix_i2v" in workflows_output
     assert main(["workflows", "show", str(project), "wan2_2_smoothmix_i2v"]) == 0
     assert "SmoothMix" in capsys.readouterr().out
     assert main(["workflows", "env", str(project), "wan2_2_smoothmix_i2v"]) == 0
     assert "COMFYUI_WORKFLOW_PROFILE=wan2_2_smoothmix_i2v" in capsys.readouterr().out
+    assert main(["workflows", "env", str(project), "qwen2512_first_frame"]) == 0
+    assert "COMFYUI_IMAGE_WORKFLOW_PROFILE=qwen2512_first_frame" in capsys.readouterr().out
 
 
 def test_cli_init_rejects_overwrite_without_force(tmp_path: Path):

@@ -80,6 +80,21 @@ def _workflow(tmp_path: Path, *, missing_node: str | None = None) -> Path:
     return path
 
 
+def _image_workflow(tmp_path: Path, *, missing_node: str | None = None) -> Path:
+    workflow = {
+        "3": {"class_type": "KSampler", "inputs": {"seed": 1, "steps": 4, "cfg": 1}},
+        "118": {"class_type": "CR SDXL Aspect Ratio", "inputs": {"width": 512, "height": 512}},
+        "187": {"class_type": "CLIPTextEncode", "inputs": {"text": "prompt"}},
+        "437": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}},
+        "499": {"class_type": "SaveImage", "inputs": {"filename_prefix": "demo"}},
+    }
+    if missing_node:
+        workflow.pop(missing_node)
+    path = tmp_path / "image-workflow.json"
+    path.write_text(json.dumps(workflow, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def _run_doctor(args: list[str], *, env: dict[str, str] | None = None):
     full_env = os.environ.copy()
     if env:
@@ -144,6 +159,28 @@ def test_comfyui_runtime_doctor_module_reads_env(tmp_path: Path):
     assert payload["ok"] is True
     assert payload["base_url"] == server.url
     assert payload["workflow"] == workflow.as_posix()
+
+
+def test_comfyui_runtime_doctor_image_mode_checks_text_to_image_nodes(tmp_path: Path):
+    workflow = _image_workflow(tmp_path)
+    with FakeComfyUIServer() as server:
+        completed = _run_doctor(
+            [
+                "--mode",
+                "image",
+                "--base-url",
+                server.url,
+                "--workflow",
+                workflow.as_posix(),
+                "--require-gpu",
+            ]
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    workflow_check = next(check for check in payload["checks"] if check["name"] == "workflow")
+    assert workflow_check["status"] == "ok"
+    assert workflow_check["details"]["required"]["width"] == ["118", "width"]
 
 
 def test_comfyui_runtime_doctor_missing_workflow_node_exits_one(tmp_path: Path):

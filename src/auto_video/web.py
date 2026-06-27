@@ -33,7 +33,7 @@ from .script_storyboard import draft_storyboard_from_script
 from .templates import init_project, list_templates
 from .validation import validate_project
 from .web_tasks import TaskLogger, WebTaskQueue
-from .workflow_registry import comfyui_wan_adapter_options, list_workflows
+from .workflow_registry import comfyui_image_adapter_options, comfyui_wan_adapter_options, list_workflows
 
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -611,7 +611,7 @@ def _run_project_action(
         return assemble_project(load_project(project_root), dry_run=bool(payload.get("dry_run", False)))
     if action == "comfyui-check":
         project = load_project(project_root)
-        profile = str(payload.get("profile") or _first_workflow_profile(project))
+        profile = str(payload.get("profile") or _first_workflow_profile(project, kind=str(payload.get("kind") or "image_to_video")))
         logger(f"检查 ComfyUI 工作流：{profile}")
         return _run_comfyui_check(project, profile, payload)
     if action in {"remote-plan", "remote-run", "remote-first-frame"}:
@@ -646,17 +646,26 @@ def _run_project_action(
     raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
 
 
-def _first_workflow_profile(project: Any) -> str:
+def _first_workflow_profile(project: Any, *, kind: str | None = None) -> str:
     names = sorted(project.config.comfyui_workflows)
     if not names:
         raise ConfigError("项目没有配置 ComfyUI 工作流", fix="请在项目配置中添加 comfyui_workflows。")
+    if kind:
+        for name in names:
+            raw = project.config.comfyui_workflows.get(name) or {}
+            if str(raw.get("kind") or "") == kind:
+                return name
     return names[0]
 
 
 def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> dict[str, Any]:
-    options = comfyui_wan_adapter_options(project, profile)
+    workflow = project.config.comfyui_workflows.get(profile) or {}
+    workflow_kind = str(payload.get("kind") or workflow.get("kind") or "")
+    is_image_workflow = workflow_kind in {"image", "text_to_image", "first_frame"} or str(workflow.get("provider") or "") == project.config.default_image_provider
+    options = comfyui_image_adapter_options(project, profile) if is_image_workflow else comfyui_wan_adapter_options(project, profile)
     workflow_path = payload.get("workflow") or options.get("workflow")
     args = Namespace(
+        mode="image" if is_image_workflow else "wan_video",
         base_url=payload.get("base_url") or options.get("base_url"),
         base_url_env=options.get("base_url_env"),
         workflow=_runtime_workflow_path(project, workflow_path),
@@ -666,12 +675,16 @@ def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> d
         require_idle=bool(payload.get("require_idle", False)),
         image_node=options.get("image_node", "224"),
         image_input=options.get("image_input", "image"),
-        prompt_node=options.get("prompt_node", "257"),
-        prompt_input=options.get("prompt_input", "value"),
-        negative_node=options.get("negative_node", "218"),
+        prompt_node=options.get("prompt_node", "187" if is_image_workflow else "257"),
+        prompt_input=options.get("prompt_input", "text" if is_image_workflow else "value"),
+        negative_node=options.get("negative_node", "437" if is_image_workflow else "218"),
         negative_input=options.get("negative_input", "text"),
-        seed_node=options.get("seed_node", "231"),
+        seed_node=options.get("seed_node", "3" if is_image_workflow else "231"),
         seed_input=options.get("seed_input", "seed"),
+        size_node=options.get("size_node", "118"),
+        width_input=options.get("width_input", "width"),
+        height_input=options.get("height_input", "height"),
+        output_node=options.get("output_node", "499"),
         duration_node=options.get("duration_node", "238"),
         duration_input=options.get("duration_input", "value"),
         resolution_node=options.get("resolution_node", "248"),
@@ -679,7 +692,7 @@ def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> d
         video_node=options.get("video_node", "230"),
         frame_rate_input=options.get("frame_rate_input", "frame_rate"),
         filename_prefix_input=options.get("filename_prefix_input", "filename_prefix"),
-        steps_node=options.get("steps_node", ["228", "229"]),
+        steps_node=options.get("steps_node", ["3"] if is_image_workflow else ["228", "229"]),
         steps_input=options.get("steps_input", "steps"),
         cfg_input=options.get("cfg_input", "cfg"),
     )
