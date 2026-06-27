@@ -94,6 +94,19 @@ class ProviderConfig:
 
 
 @dataclass(frozen=True)
+class PromptProfile:
+    subject: str = ""
+    character: str = ""
+    setting: str = ""
+    visual_style: str = ""
+    camera_style: str = ""
+    motion_style: str = ""
+    lighting_style: str = ""
+    continuity: str = ""
+    negative: str = ""
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     name: str
     root: Path
@@ -108,6 +121,7 @@ class ProjectConfig:
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     remote_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
     comfyui_workflows: dict[str, dict[str, Any]] = field(default_factory=dict)
+    prompt_profile: PromptProfile = field(default_factory=PromptProfile)
 
     def __post_init__(self) -> None:
         configured = set(self.providers)

@@ -92,7 +92,7 @@ def build_jobs(
                 shot_id=shot.id,
                 kind=kind,
                 provider=provider,
-                prompt=plan_prompt(shot, provider=provider),
+                prompt=plan_prompt(shot, provider=provider, profile=project.config.prompt_profile),
                 negative_prompt=shot.negative_prompt,
                 duration=shot.duration if kind in {"video", "audio"} else None,
                 output_path=relative_output_path(shot.id, kind),

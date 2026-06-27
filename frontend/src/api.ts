@@ -2,6 +2,7 @@ import axios from "axios";
 import type {
   ApiEnvelope,
   ComfyCheck,
+  PromptProfile,
   ProjectDetail,
   ProjectSummary,
   RemoteProfilePayload,
@@ -75,6 +76,14 @@ export async function saveConfig(name: string, text: string): Promise<ProjectDet
 
 export async function saveShots(name: string, shots: unknown[]): Promise<ProjectDetail> {
   const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(`/api/projects/${encodeURIComponent(name)}/shots`, { shots });
+  return data.project;
+}
+
+export async function updatePromptProfile(name: string, payload: PromptProfile): Promise<ProjectDetail> {
+  const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(
+    `/api/projects/${encodeURIComponent(name)}/prompt-profile`,
+    payload
+  );
   return data.project;
 }
 

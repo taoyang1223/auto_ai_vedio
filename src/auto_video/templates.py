@@ -35,6 +35,16 @@ fps: 30
 default_video_provider: mock
 default_image_provider: mock
 default_audio_provider: mock
+prompt_profile:
+  subject: A tired desk worker discovering a simple product promise
+  character: Same person across the shot, natural posture and consistent clothing
+  setting: Cold late-night desk with a small amount of screen glow
+  visual_style: realistic commercial demo, clean composition
+  camera_style: restrained camera movement, stable framing
+  motion_style: subtle human motion and coherent object movement
+  lighting_style: cold fluorescent light with soft practical highlights
+  continuity: keep the same subject, desk layout, and understated product mood
+  negative: identity drift, style drift, unreadable text
 render:
   transition:
     type: fade
@@ -86,6 +96,16 @@ fps: 16
 default_video_provider: comfyui_wan
 default_image_provider: mock
 default_audio_provider: mock
+prompt_profile:
+  subject: 专注的 AI 视频创作者与自动化影像工作台
+  character: 同一位创作者，现代简洁穿着，沉稳自信，动作自然
+  setting: 现代影像工作室，故事板、显示器、生产桌面贯穿全片
+  visual_style: realistic cinematic commercial film, premium tech product demo, refined materials
+  camera_style: smooth controlled camera movement, stable composition, cinematic depth
+  motion_style: natural hand movement, subtle parallax, coherent object motion
+  lighting_style: soft key light, practical screen glow, clean rim light, controlled contrast
+  continuity: preserve the same creator, workspace, color palette, and premium AI video production theme across all shots
+  negative: text, watermark, logo, flicker, inconsistent character, identity drift, style drift
 render:
   transition:
     type: fade

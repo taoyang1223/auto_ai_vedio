@@ -44,6 +44,8 @@ def test_cli_init_autodl_comfyui_wan_template(tmp_path: Path):
     project_yaml = (project / "project.yaml").read_text(encoding="utf-8")
     assert "comfyui_wan" in project_yaml
     assert "wan2_2_smoothmix_i2v" in project_yaml
+    assert "prompt_profile:" in project_yaml
+    assert "专注的 AI 视频创作者" in project_yaml
     assert "PATH: /opt/auto-ai-video/.venv/bin" in project_yaml
     for shot_id in ("S01", "S02", "S03"):
         assert _png_size(project / "assets" / "refs" / f"{shot_id}_first_frame.png") == (832, 544)

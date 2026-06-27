@@ -28,6 +28,25 @@ def test_build_jobs_uses_only_filter(demo_project_files):
     assert jobs == []
 
 
+def test_build_jobs_injects_project_prompt_profile(demo_project_files):
+    with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            """
+prompt_profile:
+  subject: same cinematic creator
+  continuity: keep the same studio layout
+  negative: identity drift
+""",
+        )
+    project = load_project(demo_project_files)
+
+    jobs = build_jobs(project, kind="video", provider_name="wan")
+
+    assert "Subject: same cinematic creator" in jobs[0].prompt
+    assert "Continuity rules: keep the same studio layout" in jobs[0].prompt
+    assert "Negative: text, watermark, identity drift" in jobs[0].prompt
+
+
 def test_project_loader_reads_provider_config(demo_project_files):
     (demo_project_files / "project.yaml").write_text(
         """

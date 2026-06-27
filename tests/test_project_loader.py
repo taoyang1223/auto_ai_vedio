@@ -38,6 +38,26 @@ remote_profiles:
     assert profile["remote_env"]["COMFYUI_BASE_URL"] == "http://127.0.0.1:6006"
 
 
+def test_load_project_reads_prompt_profile(demo_project_files):
+    with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            """
+prompt_profile:
+  subject: same creator
+  setting: consistent workshop
+  continuity: preserve face and wardrobe
+  negative: identity drift
+""",
+        )
+
+    project = load_project(demo_project_files)
+
+    assert project.config.prompt_profile.subject == "same creator"
+    assert project.config.prompt_profile.setting == "consistent workshop"
+    assert project.config.prompt_profile.continuity == "preserve face and wardrobe"
+    assert project.config.prompt_profile.negative == "identity drift"
+
+
 def test_resolve_project_path_rejects_escape(demo_project_files):
     with pytest.raises(AssetError) as exc:
         resolve_project_path(demo_project_files, "../secret.txt")

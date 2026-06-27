@@ -15,11 +15,12 @@ import {
   logout,
   saveConfig,
   saveShots,
+  updatePromptProfile,
   updateRemoteProfile,
   updateWorkflowSettings,
   uploadFirstFrame
 } from "./api";
-import type { ProjectDetail, ProjectSummary, RemoteProfilePayload, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
+import type { ProjectDetail, ProjectSummary, PromptProfile, RemoteProfilePayload, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
 
 type AppState = {
   workspace: string;
@@ -42,6 +43,7 @@ type AppState = {
   setShots: (shots: Shot[]) => void;
   persistShots: () => Promise<void>;
   persistConfig: (text: string) => Promise<void>;
+  savePromptProfile: (payload: PromptProfile) => Promise<ProjectDetail>;
   saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
   saveRemoteProfile: (profile: string, payload: RemoteProfilePayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
@@ -191,6 +193,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const saved = await saveConfig(activeProject, text);
     set({ detail: saved, configText: text, message: "配置已保存" });
     await get().refreshProjects();
+  },
+
+  savePromptProfile: async (payload: PromptProfile) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await updatePromptProfile(activeProject, payload);
+    const configText = await fetchConfig(activeProject);
+    set({ detail: saved, configText, message: "提示词设定已保存" });
+    await get().refreshProjects();
+    return saved;
   },
 
   saveWorkflowSettings: async (profile: string, payload: WorkflowSettingsPayload) => {

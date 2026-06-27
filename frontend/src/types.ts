@@ -80,6 +80,18 @@ export type RemoteProfilePayload = {
   ssh_port?: string;
 };
 
+export type PromptProfile = {
+  subject: string;
+  character: string;
+  setting: string;
+  visual_style: string;
+  camera_style: string;
+  motion_style: string;
+  lighting_style: string;
+  continuity: string;
+  negative: string;
+};
+
 export type RenderSummary = {
   status?: string;
   path?: string;
@@ -94,6 +106,7 @@ export type ProjectDetail = ProjectSummary & {
     fps: number;
     default_video_provider: string;
   };
+  prompt_profile: PromptProfile;
   shots_detail: Shot[];
   remote_profiles_detail: RemoteProfileSummary[];
   workflows_detail: WorkflowSummary[];

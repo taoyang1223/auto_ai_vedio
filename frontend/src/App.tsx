@@ -49,12 +49,13 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
-import type { ComfyCheck, ProjectDetail, RemoteProfileSummary, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
+import type { ComfyCheck, ProjectDetail, PromptProfile, RemoteProfileSummary, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
 
-type TabKey = "shots" | "review" | "workflow" | "run" | "config";
+type TabKey = "shots" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
   { key: "shots", label: "分镜编排", icon: Clapperboard },
+  { key: "prompt", label: "提示词", icon: Wand2 },
   { key: "review", label: "成片审看", icon: Eye },
   { key: "workflow", label: "工作流配置", icon: Boxes },
   { key: "run", label: "任务运行", icon: Play },
@@ -419,6 +420,7 @@ function ProjectConsole() {
       </nav>
 
       {tab === "shots" ? <ShotsPanel /> : null}
+      {tab === "prompt" ? <PromptProfilePanel /> : null}
       {tab === "review" ? <ReviewPanel /> : null}
       {tab === "workflow" ? <WorkflowPanel /> : null}
       {tab === "run" ? <RunPanel /> : null}
@@ -549,7 +551,7 @@ function ProductionStatus({
 }) {
   const steps = productionSteps(detail, tasks);
   return (
-    <section className="grid grid-cols-5 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
+    <section className="grid grid-cols-6 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
       {steps.map((step) => {
         const Icon = step.icon;
         return (
@@ -581,6 +583,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const readyShots = detail.shots_detail.filter((shot) => shot.visual_prompt.trim() && Number(shot.duration) > 0).length;
   const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
   const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
+  const profileFilled = Object.values(detail.prompt_profile || {}).filter((value) => String(value || "").trim()).length;
   const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
   const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
   const failedTasks = tasks.filter((task) => task.status === "failed").length;
@@ -601,6 +604,14 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       status: totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
       tab: "shots",
       icon: ImagePlus
+    },
+    {
+      key: "prompt",
+      label: "提示词设定",
+      metric: profileFilled ? `${profileFilled}/9 项已填写` : "未填写一致性",
+      status: profileFilled >= 5 ? "done" : profileFilled > 0 ? "warn" : "pending",
+      tab: "prompt",
+      icon: Wand2
     },
     {
       key: "workflow",
@@ -713,6 +724,186 @@ function ShotsPanel() {
       </DndContext>
     </section>
   );
+}
+
+const promptProfileFields: Array<{ key: keyof PromptProfile; label: string; rows?: number; compact?: boolean }> = [
+  { key: "subject", label: "主体", compact: true },
+  { key: "character", label: "角色一致性" },
+  { key: "setting", label: "场景一致性" },
+  { key: "visual_style", label: "视觉风格" },
+  { key: "camera_style", label: "镜头语言" },
+  { key: "motion_style", label: "运动风格" },
+  { key: "lighting_style", label: "灯光" },
+  { key: "continuity", label: "连续性规则" },
+  { key: "negative", label: "全局负面词" }
+];
+
+function emptyPromptProfile(): PromptProfile {
+  return {
+    subject: "",
+    character: "",
+    setting: "",
+    visual_style: "",
+    camera_style: "",
+    motion_style: "",
+    lighting_style: "",
+    continuity: "",
+    negative: ""
+  };
+}
+
+function normalizePromptProfile(profile?: Partial<PromptProfile>): PromptProfile {
+  const empty = emptyPromptProfile();
+  return Object.fromEntries(
+    Object.keys(empty).map((key) => [key, String(profile?.[key as keyof PromptProfile] || "")])
+  ) as PromptProfile;
+}
+
+function PromptProfilePanel() {
+  const { detail, savePromptProfile, setMessage } = useAppStore();
+  const [profile, setProfile] = useState<PromptProfile>(emptyPromptProfile);
+  const [selectedShotId, setSelectedShotId] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    setProfile(normalizePromptProfile(detail.prompt_profile));
+    setSelectedShotId((current) => {
+      if (detail.shots_detail.some((shot) => shot.id === current)) return current;
+      return detail.shots_detail[0]?.id || "";
+    });
+  }, [detail]);
+
+  if (!detail) return null;
+  const selectedShot = detail.shots_detail.find((shot) => shot.id === selectedShotId) || detail.shots_detail[0];
+  const filled = Object.values(profile).filter((value) => value.trim()).length;
+  const preview = selectedShot ? buildPromptPreview(profile, selectedShot) : "";
+
+  function updateField(key: keyof PromptProfile, value: string) {
+    setProfile((current) => ({ ...current, [key]: value }));
+  }
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await savePromptProfile(profile);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="grid grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] gap-4 max-2xl:grid-cols-1">
+      <article className="panel p-5">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Wand2 size={18} className="text-teal-700" />
+              提示词一致性
+            </div>
+            <div className="mt-1 text-xs text-slate-500">{filled}/9 项已填写</div>
+          </div>
+          <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+            {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+            保存提示词设定
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 max-xl:grid-cols-1">
+          {promptProfileFields.map((field) =>
+            field.compact ? (
+              <LabeledInput
+                key={field.key}
+                label={field.label}
+                value={profile[field.key]}
+                onChange={(value) => updateField(field.key, value)}
+              />
+            ) : (
+              <LabeledTextarea
+                key={field.key}
+                label={field.label}
+                rows={field.rows || 3}
+                value={profile[field.key]}
+                onChange={(value) => updateField(field.key, value)}
+              />
+            )
+          )}
+        </div>
+        {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      </article>
+
+      <aside className="panel p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Clapperboard size={18} className="text-teal-700" />
+              生成提示词预览
+            </div>
+            <div className="mt-1 text-xs text-slate-500">{selectedShot?.id || "未选择分镜"}</div>
+          </div>
+          <select className="control h-10 w-36" value={selectedShotId} onChange={(event) => setSelectedShotId(event.target.value)}>
+            {detail.shots_detail.map((shot) => (
+              <option key={shot.id} value={shot.id}>
+                {shot.id}
+              </option>
+            ))}
+          </select>
+        </div>
+        <pre className="mt-5 max-h-[720px] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100">
+          {preview}
+        </pre>
+      </aside>
+    </section>
+  );
+}
+
+function buildPromptPreview(profile: PromptProfile, shot: Shot) {
+  const profileLines = [
+    ["Subject", profile.subject],
+    ["Character continuity", profile.character],
+    ["Setting continuity", profile.setting],
+    ["Visual style", profile.visual_style],
+    ["Camera style", profile.camera_style],
+    ["Motion style", profile.motion_style],
+    ["Lighting style", profile.lighting_style],
+    ["Continuity rules", profile.continuity]
+  ]
+    .filter(([, value]) => value.trim())
+    .map(([label, value]) => `${label}: ${value}`);
+  const negative = combineNegativeTerms([shot.negative_prompt, profile.negative]);
+  return [
+    ...profileLines,
+    shot.visual_prompt,
+    `Performance: ${shot.performance}`,
+    `Camera: ${shot.camera_motion}`,
+    `Environment motion: ${shot.environment_motion}`,
+    `Lighting: ${shot.lighting}`,
+    "continuous smooth cinematic motion, no text, no watermark",
+    `Negative: ${negative}`
+  ]
+    .filter((line) => line.trim() && !line.endsWith(": "))
+    .join("\n");
+}
+
+function combineNegativeTerms(values: string[]) {
+  const seen = new Set<string>();
+  const terms: string[] = [];
+  values.forEach((value) => {
+    value.split(",").forEach((part) => {
+      const term = part.trim();
+      const key = term.toLocaleLowerCase();
+      if (!term || seen.has(key)) return;
+      seen.add(key);
+      terms.push(term);
+    });
+  });
+  return terms.join(", ");
 }
 
 function SortableShotCard({

@@ -19,6 +19,7 @@ import yaml
 
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
+from .models import PromptProfile
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
@@ -48,6 +49,7 @@ ACTION_LABELS = {
     "remote-plan": "远程预案",
     "remote-run": "远程执行",
 }
+PROMPT_PROFILE_KEYS = tuple(PromptProfile.__dataclass_fields__)
 
 
 def run_web_server(
@@ -242,6 +244,10 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 _write_shots(project_root, payload.get("shots"))
                 self._send_json({"ok": True, "project": _project_detail(project_root)})
                 return
+            if method == "PUT" and tail == ["prompt-profile"]:
+                result = _update_prompt_profile(project_root, self._read_json())
+                self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
+                return
             if method == "POST" and tail == ["first-frame"]:
                 result = _upload_first_frame(project_root, self._read_json())
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
@@ -434,6 +440,7 @@ def _project_detail(root: Path) -> dict[str, Any]:
             "fps": project.config.fps,
             "default_video_provider": project.config.default_video_provider,
         },
+        "prompt_profile": asdict(project.config.prompt_profile),
         "shots_detail": shots,
         "remote_profiles_detail": _remote_profiles_detail(project),
         "workflows_detail": list_workflows(project),
@@ -721,6 +728,37 @@ def _write_project_config(root: Path, text: str) -> None:
     except Exception:
         path.write_text(old, encoding="utf-8")
         raise
+
+
+def _update_prompt_profile(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    config_path = root / "project.yaml"
+    old_config = config_path.read_text(encoding="utf-8")
+    data = yaml.safe_load(old_config) or {}
+    if not isinstance(data, dict):
+        raise ConfigError("project.yaml must contain a mapping", fix="Restore a valid project.yaml.")
+
+    profile = data.setdefault("prompt_profile", {})
+    if not isinstance(profile, dict):
+        raise ConfigError("prompt_profile must be a mapping", fix="Use key/value prompt continuity fields.")
+    for key in PROMPT_PROFILE_KEYS:
+        if key not in payload:
+            continue
+        value = str(payload.get(key) or "").strip()
+        if value:
+            profile[key] = value
+        else:
+            profile.pop(key, None)
+    if not profile:
+        data.pop("prompt_profile", None)
+
+    try:
+        config_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        project = load_project(root)
+        validate_project(project)
+    except Exception:
+        config_path.write_text(old_config, encoding="utf-8")
+        raise
+    return {"prompt_profile": asdict(project.config.prompt_profile)}
 
 
 def _update_workflow_settings(root: Path, profile: str, payload: dict[str, Any]) -> dict[str, Any]:

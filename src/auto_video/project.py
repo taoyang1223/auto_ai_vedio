@@ -11,6 +11,7 @@ from .models import (
     AssetRef,
     Project,
     ProjectConfig,
+    PromptProfile,
     ProviderConfig,
     RenderConfig,
     RenderText,
@@ -118,6 +119,23 @@ def _comfyui_workflows(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _prompt_profile(data: dict[str, Any]) -> PromptProfile:
+    raw = data.get("prompt_profile") or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("prompt_profile must be a mapping", fix="Use key/value prompt continuity fields.")
+    return PromptProfile(
+        subject=str(raw.get("subject", "")),
+        character=str(raw.get("character", "")),
+        setting=str(raw.get("setting", "")),
+        visual_style=str(raw.get("visual_style", "")),
+        camera_style=str(raw.get("camera_style", "")),
+        motion_style=str(raw.get("motion_style", "")),
+        lighting_style=str(raw.get("lighting_style", "")),
+        continuity=str(raw.get("continuity", "")),
+        negative=str(raw.get("negative", "")),
+    )
+
+
 def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
     name = data.get("name")
     if not name:
@@ -136,6 +154,7 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
         providers=_provider_configs(data),
         remote_profiles=_remote_profiles(data),
         comfyui_workflows=_comfyui_workflows(data),
+        prompt_profile=_prompt_profile(data),
     )
 
 

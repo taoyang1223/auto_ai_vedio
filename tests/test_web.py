@@ -352,6 +352,37 @@ def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     assert uploaded["bytes"] > 0
 
 
+def test_web_api_updates_prompt_profile(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        payload = request_json(
+            base_url,
+            "/api/projects/wan_story/prompt-profile",
+            method="PUT",
+            payload={
+                "subject": "同一位 AI 影像创作者",
+                "character": "保持同一张脸和同一套服装",
+                "setting": "现代影像工作室",
+                "visual_style": "premium cinematic commercial",
+                "camera_style": "smooth controlled dolly",
+                "motion_style": "natural hand movement",
+                "lighting_style": "soft screen glow",
+                "continuity": "preserve subject identity across shots",
+                "negative": "identity drift, style drift",
+            },
+        )
+
+    project = load_project(tmp_path / "wan_story")
+    assert payload["project"]["prompt_profile"]["subject"] == "同一位 AI 影像创作者"
+    assert project.config.prompt_profile.character == "保持同一张脸和同一套服装"
+    assert project.config.prompt_profile.negative == "identity drift, style drift"
+
+
 def test_web_serves_project_media(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(
