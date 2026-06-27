@@ -231,6 +231,19 @@ Then list and use the profile:
 .venv/bin/python -m auto_video remote run demo_project --profile autodl_5090 --provider comfyui_wan --kind video
 ```
 
+For batch projects, omit `--only` to run every shot in `shots.json`. Use selection flags when resuming work:
+
+```bash
+# Plan only jobs that previously failed or were retryable failures.
+.venv/bin/python -m auto_video jobs plan demo_project --provider comfyui_wan --kind video --failed-only
+
+# Remote-run only failed jobs on the configured AutoDL profile.
+.venv/bin/python -m auto_video remote run demo_project --profile autodl_5090 --provider comfyui_wan --kind video --failed-only
+
+# Continue a batch while skipping jobs already marked succeeded in manifest.json.
+.venv/bin/python -m auto_video remote run demo_project --profile autodl_5090 --provider comfyui_wan --kind video --skip-succeeded
+```
+
 This adapter currently targets image-to-video jobs. Each shot should include an existing image reference; the adapter uploads that image to ComfyUI, patches the workflow prompt, seed, duration, resolution, frame rate, and output prefix, then downloads the first video output from ComfyUI history.
 
 ## Cloud Worker Contract

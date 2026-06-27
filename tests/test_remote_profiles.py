@@ -40,6 +40,8 @@ def test_build_remote_run_options_from_profile_merges_cli_overrides(demo_project
         provider_name="comfyui_wan",
         kind="video",
         only={"S01"},
+        failed_only=False,
+        skip_succeeded=True,
         local_dir=tmp_path / "local-override",
         remote_auto_video=None,
         ssh_options=("StrictHostKeyChecking=no",),
@@ -53,6 +55,8 @@ def test_build_remote_run_options_from_profile_merges_cli_overrides(demo_project
     assert options.remote_auto_video == "/opt/auto-ai-video/.venv/bin/auto-video"
     assert options.provider_name == "comfyui_wan"
     assert options.only == {"S01"}
+    assert options.failed_only is False
+    assert options.skip_succeeded is True
     assert options.ssh_options == ("Port=13159", "StrictHostKeyChecking=no")
     assert options.rsync_options == ("--info=progress2",)
     assert options.remote_env == (
@@ -80,6 +84,8 @@ def test_unknown_remote_profile_is_config_error(demo_project_files):
             provider_name=None,
             kind="video",
             only=None,
+            failed_only=False,
+            skip_succeeded=False,
             local_dir=None,
             remote_auto_video=None,
             ssh_options=(),

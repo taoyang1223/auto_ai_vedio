@@ -22,6 +22,8 @@ class RemoteRunOptions:
     provider_name: str | None = None
     kind: str = "video"
     only: set[str] | None = None
+    failed_only: bool = False
+    skip_succeeded: bool = False
     local_dir: Path | None = None
     remote_auto_video: str = "auto-video"
     ssh_options: tuple[str, ...] = ()
@@ -178,6 +180,11 @@ def _rsync_ssh_args(options: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def build_remote_run_plan(project: Project, options: RemoteRunOptions) -> RemoteRunPlan:
+    if options.failed_only and options.skip_succeeded:
+        raise ConfigError(
+            "failed-only and skip-succeeded cannot be used together",
+            fix="Choose one remote job selection mode.",
+        )
     _validate_host(options.host)
     _validate_remote_dir(options.remote_dir)
     _validate_command_token("remote-auto-video", options.remote_auto_video)
@@ -250,6 +257,8 @@ def run_remote_worker(
         kind=options.kind,
         provider_name=options.provider_name,
         only=options.only,
+        failed_only=options.failed_only,
+        skip_succeeded=options.skip_succeeded,
         force=True,
     )
     command_runner = runner or SubprocessCommandRunner()

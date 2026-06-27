@@ -7,6 +7,7 @@ from typing import Any
 
 from .errors import AssetError, ConfigError
 from .job_builder import build_jobs
+from .job_selection import select_jobs
 from .jobs import GenerationJob, ProviderResult, utc_now_iso
 from .models import Project
 from .project import resolve_project_path
@@ -109,6 +110,8 @@ def export_worker_bundle(
     kind: str,
     provider_name: str | None = None,
     only: set[str] | None = None,
+    failed_only: bool = False,
+    skip_succeeded: bool = False,
     force: bool = False,
 ) -> dict[str, Any]:
     _ensure_bundle_target(project.config.root, bundle)
@@ -120,6 +123,7 @@ def export_worker_bundle(
     _copy_project_snapshot(project, bundle)
 
     jobs = build_jobs(project, kind=kind, provider_name=provider_name, only=only)
+    jobs = select_jobs(jobs, project.manifest, failed_only=failed_only, skip_succeeded=skip_succeeded)
     refs = _copy_reference_assets(project, bundle, jobs)
     ref_paths = _bundle_ref_paths(refs)
     job_paths: list[str] = []

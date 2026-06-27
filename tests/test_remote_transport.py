@@ -191,6 +191,24 @@ def test_build_remote_run_plan_rejects_unsafe_remote_env(demo_project_files, tmp
     assert "remote-env" in str(value_exc.value)
 
 
+def test_build_remote_run_plan_rejects_conflicting_selection_modes(demo_project_files, tmp_path):
+    project = load_project(demo_project_files)
+
+    with pytest.raises(ConfigError) as exc:
+        build_remote_run_plan(
+            project,
+            RemoteRunOptions(
+                host="gpu-box",
+                remote_dir="/data/demo",
+                local_dir=tmp_path / "work",
+                failed_only=True,
+                skip_succeeded=True,
+            ),
+        )
+
+    assert "cannot be used together" in str(exc.value)
+
+
 class FakeRemoteRunner:
     def __init__(self, remote_bundle: Path):
         self.remote_bundle = remote_bundle

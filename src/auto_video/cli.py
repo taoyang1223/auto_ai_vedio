@@ -104,12 +104,16 @@ def build_parser() -> argparse.ArgumentParser:
     images.add_argument("--dry-run", action="store_true")
     images.add_argument("--provider")
     images.add_argument("--only")
+    images.add_argument("--failed-only", action="store_true")
+    images.add_argument("--skip-succeeded", action="store_true")
 
     generate = sub.add_parser("generate")
     generate.add_argument("project")
     generate.add_argument("--dry-run", action="store_true")
     generate.add_argument("--provider")
     generate.add_argument("--only")
+    generate.add_argument("--failed-only", action="store_true")
+    generate.add_argument("--skip-succeeded", action="store_true")
 
     assemble = sub.add_parser("assemble")
     assemble.add_argument("project")
@@ -127,12 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
     jobs_plan.add_argument("--provider")
     jobs_plan.add_argument("--kind", choices=["image", "video", "audio"], default="video")
     jobs_plan.add_argument("--only")
+    jobs_plan.add_argument("--failed-only", action="store_true")
+    jobs_plan.add_argument("--skip-succeeded", action="store_true")
 
     jobs_submit = jobs_sub.add_parser("submit")
     jobs_submit.add_argument("project")
     jobs_submit.add_argument("--provider")
     jobs_submit.add_argument("--kind", choices=["image", "video", "audio"], default="video")
     jobs_submit.add_argument("--only")
+    jobs_submit.add_argument("--failed-only", action="store_true")
+    jobs_submit.add_argument("--skip-succeeded", action="store_true")
 
     jobs_status = jobs_sub.add_parser("status")
     jobs_status.add_argument("project")
@@ -145,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     worker_export.add_argument("--provider")
     worker_export.add_argument("--kind", choices=["image", "video", "audio"], default="video")
     worker_export.add_argument("--only")
+    worker_export.add_argument("--failed-only", action="store_true")
+    worker_export.add_argument("--skip-succeeded", action="store_true")
     worker_export.add_argument("--out", required=True)
     worker_export.add_argument("--force", action="store_true")
 
@@ -166,6 +176,8 @@ def build_parser() -> argparse.ArgumentParser:
     remote_run.add_argument("--provider")
     remote_run.add_argument("--kind", choices=["image", "video", "audio"], default="video")
     remote_run.add_argument("--only")
+    remote_run.add_argument("--failed-only", action="store_true")
+    remote_run.add_argument("--skip-succeeded", action="store_true")
     remote_run.add_argument("--local-dir")
     remote_run.add_argument("--remote-auto-video")
     remote_run.add_argument("--ssh-option", action="append", default=[])
@@ -211,6 +223,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 provider_name=args.provider,
                 dry_run=args.dry_run,
                 only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
             )
             if args.dry_run:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -221,6 +235,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 provider_name=args.provider,
                 dry_run=args.dry_run,
                 only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
             )
             if args.dry_run:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -240,6 +256,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 kind=args.kind,
                 provider_name=args.provider,
                 only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
@@ -250,6 +268,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 kind=args.kind,
                 provider_name=args.provider,
                 only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
             )
             print(
                 json.dumps(
@@ -271,6 +291,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 kind=args.kind,
                 provider_name=args.provider,
                 only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
                 force=args.force,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -295,6 +317,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     provider_name=args.provider,
                     kind=args.kind,
                     only=_csv(args.only),
+                    failed_only=args.failed_only,
+                    skip_succeeded=args.skip_succeeded,
                     local_dir=Path(args.local_dir) if args.local_dir else None,
                     remote_auto_video=args.remote_auto_video,
                     ssh_options=tuple(args.ssh_option),
