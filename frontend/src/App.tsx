@@ -494,6 +494,12 @@ function FinalRenderPreview({ detail }: { detail: ProjectDetail }) {
               <Eye size={17} />
               打开成片
             </a>
+            {finalRender.subtitle ? (
+              <a className="btn" href={mediaUrl(detail.name, finalRender.subtitle)} target="_blank" rel="noreferrer">
+                <Film size={17} />
+                字幕 {finalRender.subtitle_entries || ""}
+              </a>
+            ) : null}
             {finalRender.versions?.slice(-3).map((version, index) => (
               <a
                 key={version.path}

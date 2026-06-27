@@ -150,6 +150,8 @@ export type ScriptDraftResult = {
 export type RenderSummary = {
   status?: string;
   path?: string;
+  subtitle?: string;
+  subtitle_entries?: number;
   command?: string[];
   versions?: Array<{
     path: string;

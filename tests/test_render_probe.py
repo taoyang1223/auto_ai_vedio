@@ -82,7 +82,12 @@ def test_assemble_project_runs_ffmpeg_and_records_render(demo_project_files):
     assert runner.commands[0][0] == "ffmpeg"
     assert (demo_project_files / "renders" / "final.mp4").read_bytes() == b"final-video"
     assert (demo_project_files / "renders" / "final.concat.txt").read_text(encoding="utf-8").startswith("file '")
+    subtitle = (demo_project_files / "renders" / "final.srt").read_text(encoding="utf-8")
+    assert "00:00:00,000 --> 00:00:05,000" in subtitle
+    assert "Late night again" in subtitle
     assert project.manifest["renders"]["final"]["path"] == "renders/final.mp4"
+    assert project.manifest["renders"]["final"]["subtitle"] == "renders/final.srt"
+    assert project.manifest["renders"]["final"]["subtitle_entries"] == 1
 
 
 def test_assemble_project_archives_previous_final_render(demo_project_files):

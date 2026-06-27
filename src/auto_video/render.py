@@ -53,8 +53,10 @@ def build_render_plan(project: Project) -> dict:
         )
     output = "renders/final.mp4"
     concat_file = "renders/final.concat.txt"
+    subtitle_file = "renders/final.srt"
     output_path = (project.config.root / output).as_posix()
     concat_path = (project.config.root / concat_file).as_posix()
+    subtitle_path = (project.config.root / subtitle_file).as_posix()
     ffmpeg = ["ffmpeg", "-y"]
     ffmpeg.extend(["-f", "concat", "-safe", "0", "-i", concat_path, "-c", "copy", output_path])
     return {
@@ -62,6 +64,8 @@ def build_render_plan(project: Project) -> dict:
         "output_path": output_path,
         "concat_file": concat_file,
         "concat_path": concat_path,
+        "subtitle_file": subtitle_file,
+        "subtitle_path": subtitle_path,
         "width": project.config.width,
         "height": project.config.height,
         "fps": project.config.fps,
@@ -93,10 +97,12 @@ def assemble_project(
     root = project.config.root
     output = resolve_project_path(root, str(plan["output"]))
     concat_file = resolve_project_path(root, str(plan["concat_file"]))
+    subtitle_file = resolve_project_path(root, str(plan["subtitle_file"]))
     output.parent.mkdir(parents=True, exist_ok=True)
     concat_file.parent.mkdir(parents=True, exist_ok=True)
     archived = _archive_existing_render(root, output)
     _write_concat_file(project.config.root, plan, concat_file)
+    subtitle = _write_subtitle_file(root, plan, subtitle_file)
     command = tuple(str(part) for part in plan["ffmpeg"])
     (runner or SubprocessRenderRunner()).run(command)
     if not output.exists() or output.stat().st_size == 0:
@@ -104,8 +110,8 @@ def assemble_project(
             f"render output {plan['output']} was not created",
             fix="Check ffmpeg output and clip compatibility.",
         )
-    _record_render(project, output, command, archived=archived)
-    return {**result, "status": "succeeded", "bytes": output.stat().st_size, "archived": archived}
+    _record_render(project, output, command, archived=archived, subtitle=subtitle)
+    return {**result, "status": "succeeded", "bytes": output.stat().st_size, "archived": archived, "subtitle": subtitle}
 
 
 def _quality_checks(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -153,6 +159,35 @@ def _write_concat_file(project_root: Path, plan: dict[str, Any], concat_file: Pa
     concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_subtitle_file(project_root: Path, plan: dict[str, Any], subtitle_file: Path) -> dict[str, Any] | None:
+    entries = []
+    cursor = 0.0
+    for shot in plan["shots"]:
+        text = str(shot.get("subtitle") or "").strip()
+        start = cursor
+        end = cursor + float(shot.get("duration") or 0)
+        cursor = end
+        if text:
+            entries.append((start, end, text))
+    if not entries:
+        subtitle_file.unlink(missing_ok=True)
+        return None
+    subtitle_file.parent.mkdir(parents=True, exist_ok=True)
+    blocks = []
+    for index, (start, end, text) in enumerate(entries, start=1):
+        blocks.append(f"{index}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{text}\n")
+    subtitle_file.write_text("\n".join(blocks), encoding="utf-8")
+    return {"path": _relative(project_root, subtitle_file), "entries": len(entries)}
+
+
+def _srt_timestamp(value: float) -> str:
+    total_ms = max(0, round(value * 1000))
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1000)
+    return f"{hours:02}:{minutes:02}:{seconds:02},{millis:03}"
+
+
 def _archive_existing_render(project_root: Path, output: Path) -> dict[str, Any] | None:
     if not output.exists() or output.stat().st_size <= 0:
         return None
@@ -167,7 +202,14 @@ def _archive_existing_render(project_root: Path, output: Path) -> dict[str, Any]
     }
 
 
-def _record_render(project: Project, output: Path, command: tuple[str, ...], *, archived: dict[str, Any] | None = None) -> None:
+def _record_render(
+    project: Project,
+    output: Path,
+    command: tuple[str, ...],
+    *,
+    archived: dict[str, Any] | None = None,
+    subtitle: dict[str, Any] | None = None,
+) -> None:
     store = ManifestStore(project.config.root / "manifest.json", project_name=project.config.name)
     previous = store.data["renders"].get("final")
     versions = []
@@ -180,6 +222,9 @@ def _record_render(project: Project, output: Path, command: tuple[str, ...], *, 
         "path": store._relative(output),
         "command": list(command),
     }
+    if subtitle:
+        store.data["renders"]["final"]["subtitle"] = subtitle["path"]
+        store.data["renders"]["final"]["subtitle_entries"] = subtitle["entries"]
     if versions:
         store.data["renders"]["final"]["versions"] = versions
     store.save()
