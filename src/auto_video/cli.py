@@ -12,7 +12,8 @@ from .probe import probe_project
 from .project import load_project
 from .render import build_render_plan
 from .remote_doctor import RemoteDoctorOptions, run_remote_doctor
-from .remote_transport import RemoteRunOptions, run_remote_worker
+from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
+from .remote_transport import run_remote_worker
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
@@ -159,17 +160,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     remote_run = remote_sub.add_parser("run")
     remote_run.add_argument("project")
-    remote_run.add_argument("--host", required=True)
-    remote_run.add_argument("--remote-dir", required=True)
+    remote_run.add_argument("--profile")
+    remote_run.add_argument("--host")
+    remote_run.add_argument("--remote-dir")
     remote_run.add_argument("--provider")
     remote_run.add_argument("--kind", choices=["image", "video", "audio"], default="video")
     remote_run.add_argument("--only")
     remote_run.add_argument("--local-dir")
-    remote_run.add_argument("--remote-auto-video", default="auto-video")
+    remote_run.add_argument("--remote-auto-video")
     remote_run.add_argument("--ssh-option", action="append", default=[])
     remote_run.add_argument("--rsync-option", action="append", default=[])
     remote_run.add_argument("--remote-env", action="append", default=[])
     remote_run.add_argument("--dry-run", action="store_true")
+
+    remote_profiles = remote_sub.add_parser("profiles")
+    remote_profiles.add_argument("project")
 
     remote_doctor = remote_sub.add_parser("doctor")
     remote_doctor.add_argument("--host", required=True)
@@ -282,7 +287,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             project = load_project(args.project)
             result = run_remote_worker(
                 project,
-                RemoteRunOptions(
+                build_remote_run_options_from_profile(
+                    project,
+                    profile_name=args.profile,
                     host=args.host,
                     remote_dir=args.remote_dir,
                     provider_name=args.provider,
@@ -297,6 +304,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 dry_run=args.dry_run,
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "remote" and args.remote_command == "profiles":
+            project = load_project(args.project)
+            print(json.dumps({"profiles": list_remote_profiles(project)}, ensure_ascii=False, indent=2))
             return 0
         if args.command == "remote" and args.remote_command == "doctor":
             result = run_remote_doctor(

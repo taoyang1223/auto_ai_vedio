@@ -209,6 +209,28 @@ Remote run example:
   --remote-env 'COMFYUI_WORKFLOW=/root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json'
 ```
 
+For repeated AutoDL runs, put the remote settings in `project.yaml`:
+
+```yaml
+remote_profiles:
+  autodl_5090:
+    host: root@<autodl-host>
+    remote_dir: /root/auto-video/jobs/demo
+    remote_auto_video: /opt/auto-ai-video/.venv/bin/auto-video
+    ssh_options:
+      - Port=<ssh-port>
+    remote_env:
+      COMFYUI_BASE_URL: http://127.0.0.1:6006
+      COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+```
+
+Then list and use the profile:
+
+```bash
+.venv/bin/python -m auto_video remote profiles demo_project
+.venv/bin/python -m auto_video remote run demo_project --profile autodl_5090 --provider comfyui_wan --kind video
+```
+
 This adapter currently targets image-to-video jobs. Each shot should include an existing image reference; the adapter uploads that image to ComfyUI, patches the workflow prompt, seed, duration, resolution, frame rate, and output prefix, then downloads the first video output from ComfyUI history.
 
 ## Cloud Worker Contract

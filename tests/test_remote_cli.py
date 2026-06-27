@@ -173,6 +173,106 @@ def test_remote_cli_dry_run_prints_commands_without_manifest(tmp_path: Path, cap
     assert not (local_dir / "bundle").exists()
 
 
+def test_remote_cli_lists_project_profiles(tmp_path: Path, capsys):
+    project = tmp_path / "demo"
+    assert main(["init", str(project)]) == 0
+    with (project / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            """
+remote_profiles:
+  autodl_5090:
+    host: root@gpu-box
+    remote_dir: /root/auto-video/jobs/demo
+""",
+        )
+
+    assert main(["remote", "profiles", str(project)]) == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload == {"profiles": ["autodl_5090"]}
+
+
+def test_remote_cli_dry_run_uses_project_profile(tmp_path: Path, capsys):
+    project = tmp_path / "demo"
+    local_dir = tmp_path / "profile-remote-work"
+    assert main(["init", str(project)]) == 0
+    with (project / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"""
+remote_profiles:
+  autodl_5090:
+    host: root@gpu-box
+    remote_dir: /root/auto-video/jobs/demo
+    local_dir: {local_dir.as_posix()}
+    remote_auto_video: /opt/auto-ai-video/.venv/bin/auto-video
+    ssh_options:
+      - Port=13159
+    remote_env:
+      COMFYUI_BASE_URL: http://127.0.0.1:6006
+      COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10.json
+""",
+        )
+
+    assert (
+        main(
+            [
+                "remote",
+                "run",
+                str(project),
+                "--profile",
+                "autodl_5090",
+                "--provider",
+                "comfyui_wan",
+                "--kind",
+                "video",
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["dry_run"] is True
+    assert payload["host"] == "root@gpu-box"
+    assert payload["remote_dir"] == "/root/auto-video/jobs/demo"
+    assert payload["local_bundle"] == (local_dir / "bundle").as_posix()
+    assert payload["commands"]["upload"][:4] == ["rsync", "-az", "-e", "ssh -o Port=13159"]
+    assert payload["commands"]["run"] == [
+        "ssh",
+        "-o",
+        "Port=13159",
+        "root@gpu-box",
+        "COMFYUI_BASE_URL=http://127.0.0.1:6006",
+        "COMFYUI_WORKFLOW=/root/zealman-app/workflows/G10.json",
+        "/opt/auto-ai-video/.venv/bin/auto-video",
+        "worker",
+        "run",
+        "/root/auto-video/jobs/demo",
+    ]
+    assert not (project / "manifest.json").exists()
+
+
+def test_remote_cli_requires_host_without_profile(tmp_path: Path, capsys):
+    project = tmp_path / "demo"
+    assert main(["init", str(project)]) == 0
+
+    assert (
+        main(
+            [
+                "remote",
+                "run",
+                str(project),
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+                "--dry-run",
+            ]
+        )
+        == 1
+    )
+
+    assert "--host is required" in capsys.readouterr().out
+
+
 def test_remote_cli_fake_execution_imports_manifest(tmp_path: Path, monkeypatch, capsys):
     project = tmp_path / "demo"
     local_dir = tmp_path / "remote-work"

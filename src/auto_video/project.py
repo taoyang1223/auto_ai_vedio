@@ -90,6 +90,20 @@ def _provider_configs(data: dict[str, Any]) -> dict[str, ProviderConfig]:
     return result
 
 
+def _remote_profiles(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    profiles = data.get("remote_profiles") or {}
+    if not isinstance(profiles, dict):
+        raise ConfigError("remote_profiles must be a mapping", fix="Use profile names as keys under remote_profiles.")
+    result: dict[str, dict[str, Any]] = {}
+    for name, raw in profiles.items():
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            raise ConfigError(f"remote profile {name} must be a mapping", fix="Use key/value profile settings.")
+        result[str(name)] = dict(raw)
+    return result
+
+
 def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
     name = data.get("name")
     if not name:
@@ -106,6 +120,7 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
         default_audio_provider=str(data.get("default_audio_provider", "mock")),
         render=_render_config(data),
         providers=_provider_configs(data),
+        remote_profiles=_remote_profiles(data),
     )
 
 
