@@ -80,6 +80,12 @@ export type RemoteProfilePayload = {
   ssh_port?: string;
 };
 
+export type RenderSummary = {
+  status?: string;
+  path?: string;
+  command?: string[];
+};
+
 export type ProjectDetail = ProjectSummary & {
   config: {
     aspect_ratio: string;
@@ -91,7 +97,7 @@ export type ProjectDetail = ProjectSummary & {
   shots_detail: Shot[];
   remote_profiles_detail: RemoteProfileSummary[];
   workflows_detail: WorkflowSummary[];
-  renders: Record<string, unknown>;
+  renders: Record<string, RenderSummary>;
 };
 
 export type ApiEnvelope<T> = T & {

@@ -398,6 +398,7 @@ function ProjectConsole() {
       </section>
 
       <ProductionStatus detail={project} onSelectTab={setTab} tasks={tasks} />
+      <FinalRenderPreview detail={project} />
 
       <nav className="flex flex-wrap gap-2">
         {tabItems.map((item) => {
@@ -434,6 +435,47 @@ function ProjectConsole() {
         />
       ) : null}
     </div>
+  );
+}
+
+function FinalRenderPreview({ detail }: { detail: ProjectDetail }) {
+  const finalRender = detail.renders.final;
+  if (!finalRender?.path) return null;
+
+  return (
+    <section className="panel overflow-hidden">
+      <div className="grid grid-cols-[minmax(280px,520px)_1fr] gap-0 max-xl:grid-cols-1">
+        <video
+          className="aspect-video h-full w-full bg-slate-950 object-contain"
+          controls
+          preload="metadata"
+          src={mediaUrl(detail.name, finalRender.path)}
+        />
+        <div className="flex flex-col justify-between gap-5 p-5">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+              <Film size={15} />
+              最终成片
+            </div>
+            <h2 className="mt-2 text-xl font-semibold text-slate-950">{detail.title || detail.name}</h2>
+            <div className="mt-2 flex flex-wrap gap-2 text-sm text-slate-500">
+              <span>{detail.shots_detail.length} 个分镜</span>
+              <span>{detail.config.width}x{detail.config.height}</span>
+              <span>{detail.config.fps} FPS</span>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a className="btn btn-primary" href={mediaUrl(detail.name, finalRender.path)} target="_blank" rel="noreferrer">
+              <Eye size={17} />
+              打开成片
+            </a>
+            <span className="inline-flex h-10 items-center rounded-md border border-teal-200 bg-teal-50 px-3 text-sm font-medium text-teal-700">
+              {finalRender.status === "generated" ? "已生成" : finalRender.status || "已保存"}
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1108,13 +1150,14 @@ function RunPanel() {
     },
     {
       key: "remote-run",
-      label: "远程执行",
+      label: "生成剩余分镜",
       icon: Cloud,
-      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video", skip_succeeded: true },
       disabled: !firstRemoteProfile
     },
     { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
-    { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} }
+    { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} },
+    { key: "assemble", label: "合成成片", icon: Film, payload: {} }
   ];
 
   async function run(action: (typeof actions)[number]) {
