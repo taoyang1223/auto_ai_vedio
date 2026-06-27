@@ -71,6 +71,44 @@ def test_build_lipsync_job_includes_source_video_and_audio_refs(demo_project_fil
     assert "Late night again" in job.prompt
 
 
+def test_build_lipsync_job_ignores_first_frame_refs(demo_project_files):
+    clip = demo_project_files / "generated" / "clips" / "S01.mp4"
+    audio = demo_project_files / "generated" / "audio" / "S01.wav"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"clip")
+    audio.write_bytes(b"audio")
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {
+                    "S01": {
+                        "status": "generated",
+                        "clip": "generated/clips/S01.mp4",
+                        "audio": "generated/audio/S01.wav",
+                    }
+                },
+                "renders": {},
+                "jobs": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    job = build_jobs(project, kind="lipsync", provider_name="mock")[0]
+
+    assert [(ref.type, ref.role) for ref in job.refs] == [
+        ("video", "source_video"),
+        ("audio", "source_audio"),
+    ]
+
+
 def test_build_jobs_injects_project_prompt_profile(demo_project_files):
     with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
         handle.write(

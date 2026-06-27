@@ -155,9 +155,10 @@ def build_jobs(
         now = utc_now_iso()
         output_path = relative_output_path(shot.id, kind)
         output = resolve_project_path(project.config.root, output_path)
-        refs = _provider_refs(project, shot)
         if kind == "lipsync":
-            refs = (*refs, *_lipsync_refs(project, shot))
+            refs = _lipsync_refs(project, shot)
+        else:
+            refs = _provider_refs(project, shot)
         controls = _controls(project, shot)
         metadata = _job_metadata(
             kind=kind,
