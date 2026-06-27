@@ -72,6 +72,10 @@ export type Shot = {
   negative_prompt: string;
   refs: AssetRef[];
   manifest?: Record<string, unknown>;
+  freshness?: {
+    status: "generated" | "stale" | "pending";
+    message?: string;
+  };
 };
 
 export type WorkflowSummary = {

@@ -1804,6 +1804,7 @@ function SortableShotCard({
   const style = { transform: CSS.Transform.toString(transform), transition };
   const firstFrame = firstFrameRef(shot);
   const generatedClip = generatedClipRef(shot);
+  const generationStatus = shotGenerationStatus(shot);
   const [rerunning, setRerunning] = useState(false);
   const [rerunError, setRerunError] = useState("");
 
@@ -1852,12 +1853,7 @@ function SortableShotCard({
           onChange={(event) => updateShot(index, { title: event.target.value })}
           aria-label="分镜标题"
         />
-        {generatedClip ? (
-          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-xs font-medium text-teal-700">
-            <CheckCircle2 size={13} />
-            已生成
-          </span>
-        ) : null}
+        {generatedClip ? <ShotGenerationPill status={generationStatus} /> : null}
       </div>
       <div className="grid gap-4 p-4">
         {generatedClip ? (
@@ -2025,6 +2021,7 @@ function ReviewShotCard({
   const [error, setError] = useState("");
   const firstFrame = firstFrameRef(shot);
   const generatedClip = generatedClipRef(shot);
+  const generationStatus = shotGenerationStatus(shot);
 
   async function rerunShot() {
     if (!remoteProfile) {
@@ -2056,7 +2053,7 @@ function ReviewShotCard({
             <span className="text-lg font-bold text-teal-700">{shot.id}</span>
             <span className="truncate text-sm font-semibold text-slate-900">{shot.title}</span>
           </div>
-          <div className="mt-0.5 text-xs text-slate-500">{generatedClip ? "已生成" : "未生成"}</div>
+          <div className="mt-0.5 text-xs text-slate-500">{shotGenerationLabel(generationStatus, Boolean(generatedClip))}</div>
         </div>
         <button className="btn h-9 px-2 text-xs" disabled={busy} onClick={rerunShot} type="button">
           {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
@@ -2807,6 +2804,28 @@ function firstFrameRef(shot: Shot) {
 function generatedClipRef(shot: Shot) {
   const clip = shot.manifest?.clip;
   return typeof clip === "string" ? clip : "";
+}
+
+function shotGenerationStatus(shot: Shot) {
+  return shot.freshness?.status || (generatedClipRef(shot) ? "generated" : "pending");
+}
+
+function shotGenerationLabel(status: ReturnType<typeof shotGenerationStatus>, hasClip: boolean) {
+  if (status === "stale") return "首帧已更新，需重跑";
+  if (status === "generated") return "已生成";
+  return hasClip ? "需检查" : "未生成";
+}
+
+function ShotGenerationPill({ status }: { status: ReturnType<typeof shotGenerationStatus> }) {
+  const stale = status === "stale";
+  const className = stale ? "border-amber-200 bg-amber-50 text-amber-700" : "border-teal-200 bg-teal-50 text-teal-700";
+  const Icon = stale ? AlertCircle : CheckCircle2;
+  return (
+    <span className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium ${className}`}>
+      <Icon size={13} />
+      {stale ? "需重跑" : "已生成"}
+    </span>
+  );
 }
 
 function mediaUrl(projectName: string, path: string) {

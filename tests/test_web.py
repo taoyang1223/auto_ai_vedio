@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -227,6 +228,42 @@ def test_web_api_deletes_project(tmp_path):
     assert deleted["deleted"] == "delete_me"
     assert listed["projects"] == []
     assert not (tmp_path / "delete_me").exists()
+
+
+def test_web_marks_generated_shot_stale_when_first_frame_is_newer(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        project = tmp_path / "wan_story"
+        output = project / "generated" / "clips" / "S01.mp4"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("old video", encoding="utf-8")
+        ref = project / "assets" / "refs" / "S01_first_frame.png"
+        os.utime(output, (1000, 1000))
+        os.utime(ref, (2000, 2000))
+        (project / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "project": "wan_story",
+                    "schema_version": "0.1",
+                    "assets": {},
+                    "shots": {"S01": {"status": "generated", "provider": "comfyui_wan", "clip": "generated/clips/S01.mp4"}},
+                    "renders": {},
+                    "jobs": {"wan_story:S01:video:comfyui_wan": {"status": "succeeded"}},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        detail = request_json(base_url, "/api/projects/wan_story")["project"]
+
+    assert detail["shots_detail"][0]["freshness"]["status"] == "stale"
 
 
 def test_web_missing_project_returns_chinese_error(tmp_path):

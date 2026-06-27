@@ -6,6 +6,12 @@ from auto_video.job_selection import select_jobs
 from auto_video.project import load_project
 
 
+def _write_output(project):
+    output = project / "generated" / "clips" / "S01.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("generated video", encoding="utf-8")
+
+
 def test_select_jobs_failed_only_uses_job_status(demo_project_files):
     project = load_project(demo_project_files)
     job = build_jobs(project, kind="video", provider_name="mock")[0]
@@ -20,6 +26,7 @@ def test_select_jobs_failed_only_uses_job_status(demo_project_files):
 
 
 def test_select_jobs_skip_succeeded_uses_job_status(demo_project_files):
+    _write_output(demo_project_files)
     project = load_project(demo_project_files)
     job = build_jobs(project, kind="video", provider_name="mock")[0]
 
@@ -33,6 +40,7 @@ def test_select_jobs_skip_succeeded_uses_job_status(demo_project_files):
 
 
 def test_select_jobs_uses_legacy_shot_status_when_job_missing(demo_project_files):
+    _write_output(demo_project_files)
     project = load_project(demo_project_files)
     job = build_jobs(project, kind="video", provider_name="mock")[0]
 

@@ -36,26 +36,37 @@ def _provider_refs(project: Project, shot: ShotPlan) -> tuple[ProviderReference,
         path = str(ref.get("path", ""))
         if not path:
             continue
+        source = resolve_project_path(project.config.root, path)
         refs.append(
             ProviderReference(
                 path=path,
                 type=str(ref.get("type", "image")),
                 role=str(ref.get("role", "first_frame")),
                 usage=str(ref.get("usage", "preserve_subject")),
-                exists=resolve_project_path(project.config.root, path).exists(),
+                exists=source.exists(),
+                updated_at=_mtime(source),
             )
         )
     for ref in shot.refs:
+        source = resolve_project_path(project.config.root, ref.path)
         refs.append(
             ProviderReference(
                 path=ref.path,
                 type=ref.type,
                 role=ref.role,
                 usage=ref.usage,
-                exists=resolve_project_path(project.config.root, ref.path).exists(),
+                exists=source.exists(),
+                updated_at=_mtime(source),
             )
         )
     return tuple(refs)
+
+
+def _mtime(path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return None
 
 
 def _controls(project: Project, shot: ShotPlan) -> ProviderControls:
@@ -93,6 +104,8 @@ def build_jobs(
         )
         negative_prompt = image_prompts.get(shot.id, {}).get("negative_prompt") or shot.negative_prompt
         now = utc_now_iso()
+        output_path = relative_output_path(shot.id, kind)
+        output = resolve_project_path(project.config.root, output_path)
         jobs.append(
             GenerationJob(
                 id=make_job_id(project.config.name, shot.id, kind, provider),
@@ -103,7 +116,9 @@ def build_jobs(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
                 duration=shot.duration if kind in {"video", "audio"} else None,
-                output_path=relative_output_path(shot.id, kind),
+                output_path=output_path,
+                output_exists=output.exists(),
+                output_updated_at=_mtime(output),
                 refs=_provider_refs(project, shot),
                 controls=_controls(project, shot),
                 created_at=now,

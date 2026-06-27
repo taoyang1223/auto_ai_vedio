@@ -1,4 +1,5 @@
 import json
+import os
 
 from auto_video.pipeline import plan_jobs, submit_jobs
 from auto_video.project import load_project
@@ -98,11 +99,70 @@ def test_plan_jobs_skip_succeeded_keeps_unfinished_jobs(demo_project_files):
         ),
         encoding="utf-8",
     )
+    output = demo_project_files / "generated" / "clips" / "S01.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("finished clip", encoding="utf-8")
     project = load_project(demo_project_files)
 
     plan = plan_jobs(project, kind="video", provider_name="mock", skip_succeeded=True)
 
     assert [job["shot_id"] for job in plan["planned"]] == ["S02"]
+
+
+def test_plan_jobs_skip_succeeded_reruns_missing_output(demo_project_files):
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {},
+                "renders": {},
+                "jobs": {
+                    "demo_ad:S01:video:mock": {"status": "succeeded"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    plan = plan_jobs(project, kind="video", provider_name="mock", skip_succeeded=True)
+
+    assert [job["shot_id"] for job in plan["planned"]] == ["S01"]
+
+
+def test_plan_jobs_skip_succeeded_reruns_stale_output(demo_project_files):
+    output = demo_project_files / "generated" / "clips" / "S01.mp4"
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text("old clip", encoding="utf-8")
+    ref = demo_project_files / "assets" / "refs" / "S01.txt"
+    os.utime(output, (1000, 1000))
+    os.utime(ref, (2000, 2000))
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {},
+                "renders": {},
+                "jobs": {
+                    "demo_ad:S01:video:mock": {"status": "succeeded"},
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    plan = plan_jobs(project, kind="video", provider_name="mock", skip_succeeded=True)
+
+    assert [job["shot_id"] for job in plan["planned"]] == ["S01"]
 
 
 def test_submit_jobs_failed_only_reruns_failed_job(demo_project_files):

@@ -53,15 +53,18 @@ class ProviderReference:
     role: str
     usage: str
     exists: bool
+    updated_at: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProviderReference":
+        raw_updated_at = data.get("updated_at")
         return cls(
             path=str(data["path"]),
             type=str(data["type"]),
             role=str(data["role"]),
             usage=str(data["usage"]),
             exists=bool(data["exists"]),
+            updated_at=float(raw_updated_at) if raw_updated_at is not None else None,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,6 +118,8 @@ class GenerationJob:
     negative_prompt: str
     duration: float | None
     output_path: str
+    output_exists: bool = False
+    output_updated_at: float | None = None
     refs: tuple[ProviderReference, ...] = ()
     controls: ProviderControls | None = None
     status: str = "planned"
@@ -143,6 +148,8 @@ class GenerationJob:
             negative_prompt=str(data.get("negative_prompt", "")),
             duration=float(data["duration"]) if data.get("duration") is not None else None,
             output_path=str(data["output_path"]),
+            output_exists=bool(data.get("output_exists", False)),
+            output_updated_at=float(data["output_updated_at"]) if data.get("output_updated_at") is not None else None,
             refs=tuple(ProviderReference.from_dict(ref) for ref in data.get("refs", [])),
             controls=ProviderControls.from_dict(controls_data) if controls_data else None,
             status=str(data.get("status", "planned")),
@@ -167,6 +174,8 @@ class GenerationJob:
             "negative_prompt": self.negative_prompt,
             "duration": self.duration,
             "output_path": self.output_path,
+            "output_exists": self.output_exists,
+            "output_updated_at": self.output_updated_at,
             "refs": [ref.to_dict() for ref in self.refs],
             "controls": self.controls.to_dict() if self.controls else None,
             "attempts": self.attempts,

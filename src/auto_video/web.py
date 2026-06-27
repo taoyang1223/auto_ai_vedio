@@ -463,10 +463,13 @@ def _project_summary(root: Path) -> dict[str, Any]:
 def _project_detail(root: Path) -> dict[str, Any]:
     project = load_project(root)
     manifest_shots = project.manifest.get("shots", {})
+    video_refresh_ids = _video_refresh_ids(project)
     shots = []
     for shot in project.shots:
         shot_payload = asdict(shot)
-        shot_payload["manifest"] = manifest_shots.get(shot.id, {})
+        shot_manifest = manifest_shots.get(shot.id, {})
+        shot_payload["manifest"] = shot_manifest
+        shot_payload["freshness"] = _shot_freshness(shot.id, shot_manifest, video_refresh_ids)
         shots.append(shot_payload)
     return {
         **_project_summary(root),
@@ -485,6 +488,22 @@ def _project_detail(root: Path) -> dict[str, Any]:
         "workflows_detail": list_workflows(project),
         "renders": project.manifest.get("renders", {}),
     }
+
+
+def _video_refresh_ids(project: Any) -> set[str]:
+    try:
+        plan = plan_jobs(project, kind="video", skip_succeeded=True)
+    except AutoVideoError:
+        return set()
+    return {str(job.get("shot_id")) for job in plan.get("planned", []) if isinstance(job, dict)}
+
+
+def _shot_freshness(shot_id: str, manifest: Any, video_refresh_ids: set[str]) -> dict[str, str]:
+    if not isinstance(manifest, dict) or not manifest.get("clip"):
+        return {"status": "pending", "message": "尚未生成视频"}
+    if shot_id in video_refresh_ids:
+        return {"status": "stale", "message": "首帧或引用比视频更新，建议重跑"}
+    return {"status": "generated", "message": "视频与当前首帧同步"}
 
 
 def _remote_profiles_detail(project: Any) -> list[dict[str, Any]]:

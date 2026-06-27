@@ -23,7 +23,7 @@ def select_jobs(
     if failed_only:
         return [job for job in jobs if _job_status(job, manifest) in FAILED_JOB_STATUSES]
     if skip_succeeded:
-        return [job for job in jobs if _job_status(job, manifest) != "succeeded"]
+        return [job for job in jobs if _job_status(job, manifest) != "succeeded" or _job_needs_refresh(job)]
     return jobs
 
 
@@ -51,4 +51,15 @@ def _shot_has_kind_output(kind: str, shot: dict[str, Any]) -> bool:
         return bool(shot.get("image"))
     if kind == "audio":
         return bool(shot.get("audio"))
+    return False
+
+
+def _job_needs_refresh(job: GenerationJob) -> bool:
+    if not job.output_exists:
+        return True
+    if job.output_updated_at is None:
+        return False
+    for ref in job.refs:
+        if ref.exists and ref.updated_at is not None and ref.updated_at > job.output_updated_at:
+            return True
     return False
