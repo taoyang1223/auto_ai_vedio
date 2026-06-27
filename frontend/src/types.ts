@@ -85,6 +85,10 @@ export type Shot = {
     status: "generated" | "stale" | "pending";
     message?: string;
   };
+  lipsync_freshness?: {
+    status: "generated" | "stale" | "pending";
+    message?: string;
+  };
 };
 
 export type WorkflowSummary = {
@@ -241,6 +245,7 @@ export type ProjectDetail = ProjectSummary & {
     default_video_provider: string;
     default_image_provider: string;
     default_audio_provider: string;
+    default_lipsync_provider: string;
   };
   prompt_profile: PromptProfile;
   shots_detail: Shot[];

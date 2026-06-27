@@ -6,6 +6,7 @@ from auto_video.errors import ConfigError
 from auto_video.project import load_project
 from auto_video.workflow_registry import (
     comfyui_image_adapter_options,
+    comfyui_lipsync_adapter_options,
     comfyui_wan_adapter_options,
     list_workflows,
     show_workflow,
@@ -161,6 +162,71 @@ comfyui_workflows:
     assert options["width_input"] == "width"
     assert options["output_node"] == "499"
     assert options["steps_node"] == ["3"]
+
+
+def test_workflow_registry_builds_lipsync_adapter_options(demo_project_files):
+    with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            """
+providers:
+  comfyui_lipsync:
+    mode: external_command
+    command:
+      - python
+      - -m
+      - auto_video.comfyui_lipsync_adapter
+default_lipsync_provider: comfyui_lipsync
+comfyui_workflows:
+  lipsync_video_audio:
+    provider: comfyui_lipsync
+    kind: lipsync
+    base_url_env: COMFYUI_LIPSYNC_BASE_URL
+    workflow_env: COMFYUI_LIPSYNC_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/L20.json
+    parameters:
+      seed: 456
+      steps: 10
+      guidance_scale: 2
+    uploads:
+      endpoint: /upload/file
+      video_field: video
+      audio_field: audio
+      type: input
+    nodes:
+      video:
+        id: "10"
+        input: source_video
+      audio:
+        id: "11"
+        input: source_audio
+      output:
+        id: "12"
+        filename_prefix_input: prefix
+      steps:
+        ids:
+          - "13"
+        steps_input: sample_steps
+        cfg_input: cfg_scale
+""",
+        )
+    project = load_project(demo_project_files)
+
+    options = comfyui_lipsync_adapter_options(project, "lipsync_video_audio")
+
+    assert options["workflow"] == "/root/zealman-app/workflows/L20.json"
+    assert options["seed"] == 456
+    assert options["steps"] == 10
+    assert options["guidance_scale"] == 2
+    assert options["upload_endpoint"] == "/upload/file"
+    assert options["video_upload_field"] == "video"
+    assert options["audio_upload_field"] == "audio"
+    assert options["video_node"] == "10"
+    assert options["video_input"] == "source_video"
+    assert options["audio_node"] == "11"
+    assert options["audio_input"] == "source_audio"
+    assert options["output_node"] == "12"
+    assert options["filename_prefix_input"] == "prefix"
+    assert options["steps_node"] == ["13"]
 
 
 def test_unknown_workflow_profile_is_config_error(demo_project_files):

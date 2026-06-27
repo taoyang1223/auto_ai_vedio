@@ -36,7 +36,12 @@ from .script_storyboard import draft_storyboard_from_script
 from .templates import init_project, list_templates
 from .validation import validate_project
 from .web_tasks import TaskLogger, WebTaskQueue
-from .workflow_registry import comfyui_image_adapter_options, comfyui_wan_adapter_options, list_workflows
+from .workflow_registry import (
+    comfyui_image_adapter_options,
+    comfyui_lipsync_adapter_options,
+    comfyui_wan_adapter_options,
+    list_workflows,
+)
 
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -49,6 +54,8 @@ ACTION_LABELS = {
     "validate": "校验项目",
     "jobs-plan": "生成计划",
     "generate": "提交生成",
+    "lipsync-plan": "口型同步预案",
+    "lipsync": "口型同步",
     "first-frame-generate": "生成首帧",
     "probe": "验片",
     "assemble-plan": "合成预案",
@@ -482,6 +489,7 @@ def _project_detail(root: Path) -> dict[str, Any]:
     manifest_shots = project.manifest.get("shots", {})
     video_refresh_ids = _video_refresh_ids(project)
     audio_refresh_ids = _audio_refresh_ids(project)
+    lipsync_refresh_ids = _lipsync_refresh_ids(project)
     shots = []
     for shot in project.shots:
         shot_payload = asdict(shot)
@@ -489,6 +497,7 @@ def _project_detail(root: Path) -> dict[str, Any]:
         shot_payload["manifest"] = shot_manifest
         shot_payload["freshness"] = _shot_freshness(shot.id, shot_manifest, video_refresh_ids)
         shot_payload["voice_freshness"] = _audio_freshness(shot.id, shot_manifest, audio_refresh_ids)
+        shot_payload["lipsync_freshness"] = _lipsync_freshness(shot.id, shot_manifest, lipsync_refresh_ids)
         shots.append(shot_payload)
     return {
         **_project_summary(root),
@@ -500,6 +509,7 @@ def _project_detail(root: Path) -> dict[str, Any]:
             "default_video_provider": project.config.default_video_provider,
             "default_image_provider": project.config.default_image_provider,
             "default_audio_provider": project.config.default_audio_provider,
+            "default_lipsync_provider": project.config.default_lipsync_provider,
         },
         "prompt_profile": asdict(project.config.prompt_profile),
         "shots_detail": shots,
@@ -525,6 +535,14 @@ def _audio_refresh_ids(project: Any) -> set[str]:
     return {str(job.get("shot_id")) for job in plan.get("planned", []) if isinstance(job, dict)}
 
 
+def _lipsync_refresh_ids(project: Any) -> set[str]:
+    try:
+        plan = plan_jobs(project, kind="lipsync", skip_succeeded=True)
+    except AutoVideoError:
+        return set()
+    return {str(job.get("shot_id")) for job in plan.get("planned", []) if isinstance(job, dict)}
+
+
 def _shot_freshness(shot_id: str, manifest: Any, video_refresh_ids: set[str]) -> dict[str, str]:
     if not isinstance(manifest, dict) or not manifest.get("clip"):
         return {"status": "pending", "message": "尚未生成视频"}
@@ -539,6 +557,18 @@ def _audio_freshness(shot_id: str, manifest: Any, audio_refresh_ids: set[str]) -
     if shot_id in audio_refresh_ids:
         return {"status": "stale", "message": "字幕或配音配置已变化，建议重生成配音"}
     return {"status": "generated", "message": "配音与当前字幕同步"}
+
+
+def _lipsync_freshness(shot_id: str, manifest: Any, lipsync_refresh_ids: set[str]) -> dict[str, str]:
+    if not isinstance(manifest, dict):
+        return {"status": "pending", "message": "尚未生成口型同步"}
+    if not manifest.get("clip") or not manifest.get("audio"):
+        return {"status": "pending", "message": "需先生成视频和配音"}
+    if not manifest.get("lipsync_clip"):
+        return {"status": "pending", "message": "尚未生成口型同步"}
+    if shot_id in lipsync_refresh_ids:
+        return {"status": "stale", "message": "视频或配音已变化，建议重跑口型同步"}
+    return {"status": "generated", "message": "口型同步与当前视频和配音一致"}
 
 
 def _remote_profiles_detail(project: Any) -> list[dict[str, Any]]:
@@ -618,6 +648,19 @@ def _run_project_action(
         )
         logger(f"计划任务 {len(result.get('planned', []))} 个")
         return result
+    if action == "lipsync-plan":
+        project = load_project(project_root)
+        logger("根据已生成视频和配音生成口型同步计划")
+        result = plan_jobs(
+            project,
+            kind="lipsync",
+            provider_name=payload.get("provider") or project.config.default_lipsync_provider,
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", True)),
+        )
+        logger(f"计划口型同步任务 {len(result.get('planned', []))} 个")
+        return result
     if action == "generate":
         project = load_project(project_root)
         kind = str(payload.get("kind") or "video")
@@ -631,6 +674,22 @@ def _run_project_action(
             skip_succeeded=bool(payload.get("skip_succeeded", False)),
         )
         logger(f"生成执行完成，共返回 {len(results)} 个结果")
+        return {
+            "count": len(results),
+            "submitted": [_provider_result_summary(result, project.config.root) for result in results],
+        }
+    if action == "lipsync":
+        project = load_project(project_root)
+        logger("开始执行口型同步任务")
+        results = submit_jobs(
+            project,
+            kind="lipsync",
+            provider_name=payload.get("provider") or project.config.default_lipsync_provider,
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", True)),
+        )
+        logger(f"口型同步完成，共返回 {len(results)} 个结果")
         return {
             "count": len(results),
             "submitted": [_provider_result_summary(result, project.config.root) for result in results],
@@ -688,7 +747,7 @@ def _run_project_action(
         project = load_project(project_root)
         logger("构建远程执行参数")
         kind = "image" if action == "remote-first-frame" else str(payload.get("kind") or "video")
-        provider_name = payload.get("provider") or ("comfyui_wan" if kind == "video" else project.config.default_image_provider)
+        provider_name = payload.get("provider") or _default_provider_for_kind(project, kind, prefer_comfy_video=True)
         options = build_remote_run_options_from_profile(
             project,
             profile_name=payload.get("profile") or None,
@@ -722,12 +781,12 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
     remote_profile = str(payload.get("profile") or _first_remote_profile(project) or "")
     use_remote = bool(remote_profile) and not bool(payload.get("local_only", False))
 
-    logger("步骤 1/6：校验项目")
+    logger("步骤 1/7：校验项目")
     warnings = validate_project(project)
     steps.append({"step": "validate", "warning_count": len(warnings), "warnings": warnings})
 
     if not bool(payload.get("skip_first_frames", False)):
-        logger("步骤 2/6：生成或补齐首帧")
+        logger("步骤 2/7：生成或补齐首帧")
         if use_remote and project.config.default_image_provider != "mock":
             image_result = _run_remote_generation(
                 project,
@@ -749,7 +808,7 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
         steps.append({"step": "first_frames", "result": image_result})
 
     project = load_project(project_root)
-    logger("步骤 3/6：生成缺失或过期分镜视频")
+    logger("步骤 3/7：生成缺失或过期分镜视频")
     if use_remote and project.config.default_video_provider != "mock":
         video_result = _run_remote_generation(
             project,
@@ -772,7 +831,7 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
 
     project = load_project(project_root)
     if not bool(payload.get("skip_voiceover", False)):
-        logger("步骤 4/6：生成缺失或过期配音")
+        logger("步骤 4/7：生成缺失或过期配音")
         audio_results = submit_jobs(
             project,
             kind="audio",
@@ -783,11 +842,41 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
         audio_result = {"count": len(audio_results), "submitted": [_provider_result_summary(result, project.config.root) for result in audio_results]}
         steps.append({"step": "voiceover", "result": audio_result})
     else:
-        logger("步骤 4/6：跳过配音")
+        logger("步骤 4/7：跳过配音")
         steps.append({"step": "voiceover", "skipped": True})
 
     project = load_project(project_root)
-    logger("步骤 5/6：自动验片")
+    if not bool(payload.get("skip_lipsync", False)):
+        logger("步骤 5/7：执行口型同步")
+        lipsync_provider = payload.get("lipsync_provider") or project.config.default_lipsync_provider
+        if use_remote and lipsync_provider != "mock":
+            lipsync_result = _run_remote_generation(
+                project,
+                profile=remote_profile,
+                provider=lipsync_provider,
+                kind="lipsync",
+                payload=payload,
+                skip_succeeded=True,
+            )
+        else:
+            lipsync_results = submit_jobs(
+                project,
+                kind="lipsync",
+                provider_name=lipsync_provider,
+                only=_payload_only(payload),
+                skip_succeeded=True,
+            )
+            lipsync_result = {
+                "count": len(lipsync_results),
+                "submitted": [_provider_result_summary(result, project.config.root) for result in lipsync_results],
+            }
+        steps.append({"step": "lipsync", "result": lipsync_result})
+    else:
+        logger("步骤 5/7：跳过口型同步")
+        steps.append({"step": "lipsync", "skipped": True})
+
+    project = load_project(project_root)
+    logger("步骤 6/7：自动验片")
     probe = probe_project(
         project,
         dry_run=bool(payload.get("probe_dry_run", project.config.default_video_provider == "mock")),
@@ -797,11 +886,11 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
 
     project = load_project(project_root)
     if not bool(payload.get("skip_assemble", False)):
-        logger("步骤 6/6：合成成片")
+        logger("步骤 7/7：合成成片")
         render = assemble_project(project, dry_run=bool(payload.get("dry_run", project.config.default_video_provider == "mock")))
         steps.append({"step": "assemble", "result": render})
     else:
-        logger("步骤 6/6：跳过合成")
+        logger("步骤 7/7：跳过合成")
         steps.append({"step": "assemble", "skipped": True})
 
     if bool(payload.get("extract_continuity", True)):
@@ -902,10 +991,14 @@ def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> d
     workflow = project.config.comfyui_workflows.get(profile) or {}
     workflow_kind = str(payload.get("kind") or workflow.get("kind") or "")
     is_image_workflow = workflow_kind in {"image", "text_to_image", "first_frame"} or str(workflow.get("provider") or "") == project.config.default_image_provider
-    options = comfyui_image_adapter_options(project, profile) if is_image_workflow else comfyui_wan_adapter_options(project, profile)
+    is_lipsync_workflow = workflow_kind in {"lipsync", "lip_sync", "audio_to_video"}
+    if is_lipsync_workflow:
+        options = comfyui_lipsync_adapter_options(project, profile)
+    else:
+        options = comfyui_image_adapter_options(project, profile) if is_image_workflow else comfyui_wan_adapter_options(project, profile)
     workflow_path = payload.get("workflow") or options.get("workflow")
     args = Namespace(
-        mode="image" if is_image_workflow else "wan_video",
+        mode="lipsync" if is_lipsync_workflow else "image" if is_image_workflow else "wan_video",
         base_url=payload.get("base_url") or options.get("base_url"),
         base_url_env=options.get("base_url_env"),
         workflow=_runtime_workflow_path(project, workflow_path),
@@ -924,15 +1017,18 @@ def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> d
         size_node=options.get("size_node", "118"),
         width_input=options.get("width_input", "width"),
         height_input=options.get("height_input", "height"),
-        output_node=options.get("output_node", "499"),
+        output_node=options.get("output_node", "output" if is_lipsync_workflow else "499"),
         duration_node=options.get("duration_node", "238"),
         duration_input=options.get("duration_input", "value"),
         resolution_node=options.get("resolution_node", "248"),
         resolution_input=options.get("resolution_input", "value"),
-        video_node=options.get("video_node", "230"),
+        video_node=options.get("video_node", "video" if is_lipsync_workflow else "230"),
+        video_input=options.get("video_input", "video"),
+        audio_node=options.get("audio_node", "audio"),
+        audio_input=options.get("audio_input", "audio"),
         frame_rate_input=options.get("frame_rate_input", "frame_rate"),
         filename_prefix_input=options.get("filename_prefix_input", "filename_prefix"),
-        steps_node=options.get("steps_node", ["3"] if is_image_workflow else ["228", "229"]),
+        steps_node=options.get("steps_node", [] if is_lipsync_workflow else ["3"] if is_image_workflow else ["228", "229"]),
         steps_input=options.get("steps_input", "steps"),
         cfg_input=options.get("cfg_input", "cfg"),
     )
@@ -947,6 +1043,18 @@ def _runtime_workflow_path(project: Any, value: Any) -> str | None:
     if path.is_absolute():
         return path.as_posix()
     return (project.config.root / path).resolve().as_posix()
+
+
+def _default_provider_for_kind(project: Any, kind: str, *, prefer_comfy_video: bool = False) -> str:
+    if kind == "image":
+        return project.config.default_image_provider
+    if kind == "audio":
+        return project.config.default_audio_provider
+    if kind == "lipsync":
+        return project.config.default_lipsync_provider
+    if prefer_comfy_video and "comfyui_wan" in project.config.providers:
+        return "comfyui_wan"
+    return project.config.default_video_provider
 
 
 def _payload_only(payload: dict[str, Any]) -> set[str] | None:

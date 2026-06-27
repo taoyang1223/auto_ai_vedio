@@ -24,6 +24,13 @@ class MockProvider:
         elif job.kind == "video":
             output_path.write_text(f"mock video for {job.shot_id}\n{job.prompt}\n", encoding="utf-8")
             duration = job.duration
+        elif job.kind == "lipsync":
+            source = next((project_root / ref.path for ref in job.refs if ref.type == "video" and ref.exists), None)
+            if source and source.exists():
+                output_path.write_bytes(source.read_bytes())
+            else:
+                output_path.write_text(f"mock lip-sync video for {job.shot_id}\n{job.prompt}\n", encoding="utf-8")
+            duration = job.duration
         else:
             output_path.write_bytes(_mock_wav(duration=job.duration or 1.0, seed=f"{job.shot_id}:{job.prompt}"))
             duration = job.duration

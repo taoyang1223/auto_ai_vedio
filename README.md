@@ -40,8 +40,10 @@ python3 -m venv .venv
 The `autodl_comfyui_wan` template creates a three-shot image-to-video project with:
 
 - `comfyui_wan` external-command provider config.
+- `comfyui_lipsync` external-command provider config for video+voice lip-sync passes.
 - `local_tts` 中文配音 provider config, using subtitles as narration text.
 - A `wan2_2_smoothmix_i2v` ComfyUI workflow registry entry with node mappings.
+- A `lipsync_video_audio` ComfyUI workflow registry entry that can be replaced with your exported lip-sync API JSON.
 - An `autodl_5090` remote profile ready for host, port, and workflow path edits.
 - Placeholder first-frame PNGs under `assets/refs/`.
 - A project-local README with the validate, remote run, assemble, and wrap-up commands.
@@ -52,10 +54,13 @@ Before running it on a rented GPU, replace the placeholder PNGs with real first-
 .venv/bin/python -m auto_video validate wan_story
 .venv/bin/python -m auto_video remote run wan_story --profile autodl_5090 --provider comfyui_wan --kind video
 .venv/bin/python -m auto_video audio wan_story --provider local_tts --skip-succeeded
+.venv/bin/python -m auto_video remote run wan_story --profile autodl_5090 --provider comfyui_lipsync --kind lipsync --skip-succeeded
 .venv/bin/python -m auto_video probe wan_story --strict
 .venv/bin/python -m auto_video continuity extract-tail-frames wan_story
 .venv/bin/python -m auto_video assemble wan_story
 ```
+
+Lip-sync outputs are written to `generated/lipsync/<shot>.mp4`. Final rendering and probing prefer `lipsync_clip` when present and fall back to the original generated clip when it is missing.
 
 ## Web Console
 

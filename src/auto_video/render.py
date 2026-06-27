@@ -34,7 +34,9 @@ def build_render_plan(project: Project) -> dict:
     has_audio = False
     for shot in project.shots:
         entry = manifest_shots.get(shot.id, {})
-        clip = entry.get("clip")
+        source_clip = entry.get("clip")
+        lipsync_clip = entry.get("lipsync_clip")
+        clip = lipsync_clip or source_clip
         if not clip:
             raise RenderError(
                 f"shot {shot.id} has no generated clip in manifest",
@@ -48,6 +50,8 @@ def build_render_plan(project: Project) -> dict:
             {
                 "id": shot.id,
                 "clip": str(clip),
+                "source_clip": str(source_clip) if source_clip else None,
+                "lipsync_clip": str(lipsync_clip) if lipsync_clip else None,
                 "clip_path": clip_path.as_posix(),
                 "duration": shot.duration,
                 "subtitle": shot.subtitle,

@@ -82,10 +82,29 @@ def test_provider_result_maps_video_to_legacy_clip_asset():
     assert asset.path == Path("/tmp/demo/generated/clips/S01.mp4")
 
 
+def test_provider_result_maps_lipsync_to_synced_clip_asset():
+    result = ProviderResult(
+        job_id="demo_ad:S01:lipsync:mock",
+        shot_id="S01",
+        kind="lipsync",
+        provider="mock",
+        status="succeeded",
+        path=Path("/tmp/demo/generated/lipsync/S01.mp4"),
+        duration=5.0,
+    )
+
+    asset = result.to_asset_result()
+
+    assert asset.kind == "lipsync_clip"
+    assert asset.status == "generated"
+    assert asset.path == Path("/tmp/demo/generated/lipsync/S01.mp4")
+
+
 def test_relative_output_path_uses_expected_kind_directories():
     assert relative_output_path("S01", "image") == "generated/images/S01.png"
     assert relative_output_path("S01", "video") == "generated/clips/S01.mp4"
     assert relative_output_path("S01", "audio") == "generated/audio/S01.wav"
+    assert relative_output_path("S01", "lipsync") == "generated/lipsync/S01.mp4"
 
 
 def test_invalid_job_kind_is_config_error():

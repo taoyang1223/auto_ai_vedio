@@ -117,6 +117,7 @@ class ProjectConfig:
     default_video_provider: str = "mock"
     default_image_provider: str = "mock"
     default_audio_provider: str = "mock"
+    default_lipsync_provider: str = "mock"
     render: RenderConfig = field(default_factory=RenderConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     remote_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -129,6 +130,7 @@ class ProjectConfig:
             "default_video_provider": self.default_video_provider,
             "default_image_provider": self.default_image_provider,
             "default_audio_provider": self.default_audio_provider,
+            "default_lipsync_provider": self.default_lipsync_provider,
         }.items():
             _require_provider(provider, configured, field_name)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from .jobs import (
     GenerationJob,
@@ -23,6 +24,8 @@ def _default_provider(project: Project, kind: str) -> str:
         return project.config.default_image_provider
     if kind == "audio":
         return project.config.default_audio_provider
+    if kind == "lipsync":
+        return project.config.default_lipsync_provider
     return project.config.default_video_provider
 
 
@@ -65,6 +68,42 @@ def _provider_refs(project: Project, shot: ShotPlan) -> tuple[ProviderReference,
     return tuple(refs)
 
 
+def _lipsync_refs(project: Project, shot: ShotPlan) -> tuple[ProviderReference, ...]:
+    shot_record = project.manifest.get("shots", {}).get(shot.id, {}) if isinstance(project.manifest, dict) else {}
+    if not isinstance(shot_record, dict):
+        shot_record = {}
+    refs: list[ProviderReference] = []
+    for key, media_type, role in (
+        ("clip", "video", "source_video"),
+        ("audio", "audio", "source_audio"),
+    ):
+        ref = _manifest_media_ref(project, shot_record.get(key), media_type=media_type, role=role)
+        if ref is not None:
+            refs.append(ref)
+    return tuple(refs)
+
+
+def _manifest_media_ref(
+    project: Project,
+    value: Any,
+    *,
+    media_type: str,
+    role: str,
+) -> ProviderReference | None:
+    if not value:
+        return None
+    path = str(value)
+    source = resolve_project_path(project.config.root, path)
+    return ProviderReference(
+        path=path,
+        type=media_type,
+        role=role,
+        usage="provide_context",
+        exists=source.exists(),
+        updated_at=_mtime(source),
+    )
+
+
 def _mtime(path) -> float | None:
     try:
         return path.stat().st_mtime
@@ -105,23 +144,27 @@ def build_jobs(
     image_prompts = _first_frame_prompt_map(project) if kind == "image" else {}
     for shot in _select_shots(project, only):
         provider = provider_name or (shot.provider if kind == "video" else None) or _default_provider(project, kind)
-        prompt = image_prompts.get(shot.id, {}).get("prompt") or plan_prompt(
-            shot,
-            provider=provider,
-            profile=project.config.prompt_profile,
+        prompt = image_prompts.get(shot.id, {}).get("prompt") or (
+            _lipsync_prompt(shot) if kind == "lipsync" else plan_prompt(
+                shot,
+                provider=provider,
+                profile=project.config.prompt_profile,
+            )
         )
         negative_prompt = image_prompts.get(shot.id, {}).get("negative_prompt") or shot.negative_prompt
         now = utc_now_iso()
         output_path = relative_output_path(shot.id, kind)
         output = resolve_project_path(project.config.root, output_path)
         refs = _provider_refs(project, shot)
+        if kind == "lipsync":
+            refs = (*refs, *_lipsync_refs(project, shot))
         controls = _controls(project, shot)
         metadata = _job_metadata(
             kind=kind,
             provider=provider,
             prompt=prompt,
             negative_prompt=negative_prompt,
-            duration=shot.duration if kind in {"video", "audio"} else None,
+            duration=shot.duration if kind in {"video", "audio", "lipsync"} else None,
             refs=refs,
             controls=controls,
             speaker=shot.speaker,
@@ -139,7 +182,7 @@ def build_jobs(
                 provider=provider,
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                duration=shot.duration if kind in {"video", "audio"} else None,
+                duration=shot.duration if kind in {"video", "audio", "lipsync"} else None,
                 output_path=output_path,
                 output_exists=output.exists(),
                 output_updated_at=_mtime(output),
@@ -151,6 +194,19 @@ def build_jobs(
             )
         )
     return jobs
+
+
+def _lipsync_prompt(shot: ShotPlan) -> str:
+    parts = [
+        f"shot {shot.id} lip-sync pass",
+        f"subtitle: {shot.subtitle}" if shot.subtitle else "",
+        f"speaker: {shot.speaker}" if shot.speaker else "",
+        f"voice: {shot.voice}" if shot.voice else "",
+        f"performance: {shot.performance}" if shot.performance else "",
+        f"scene: {shot.scene}" if shot.scene else "",
+        f"wardrobe: {shot.wardrobe}" if shot.wardrobe else "",
+    ]
+    return "\n".join(part for part in parts if part)
 
 
 def _job_metadata(

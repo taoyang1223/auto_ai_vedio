@@ -53,6 +53,21 @@ def test_submit_jobs_writes_clip_and_job_manifest(demo_project_files):
     assert manifest["jobs"]["demo_ad:S01:video:mock"]["status"] == "succeeded"
 
 
+def test_submit_lipsync_jobs_writes_separate_synced_clip(demo_project_files):
+    submit_jobs(load_project(demo_project_files), kind="video", provider_name="mock")
+    submit_jobs(load_project(demo_project_files), kind="audio", provider_name="mock")
+
+    results = submit_jobs(load_project(demo_project_files), kind="lipsync", provider_name="mock")
+
+    manifest = json.loads((demo_project_files / "manifest.json").read_text(encoding="utf-8"))
+    assert results[0].job_id == "demo_ad:S01:lipsync:mock"
+    assert manifest["shots"]["S01"]["clip"] == "generated/clips/S01.mp4"
+    assert manifest["shots"]["S01"]["audio"] == "generated/audio/S01.wav"
+    assert manifest["shots"]["S01"]["lipsync_clip"] == "generated/lipsync/S01.mp4"
+    assert manifest["shots"]["S01"]["provider"] == "mock"
+    assert manifest["shots"]["S01"]["lipsync_provider"] == "mock"
+
+
 def test_plan_jobs_failed_only_selects_failed_manifest_jobs(demo_project_files):
     _make_two_shot_project(demo_project_files)
     (demo_project_files / "manifest.json").write_text(

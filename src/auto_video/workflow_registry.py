@@ -98,6 +98,37 @@ def comfyui_image_adapter_options(project: Project, name: str) -> dict[str, Any]
     return options
 
 
+def comfyui_lipsync_adapter_options(project: Project, name: str) -> dict[str, Any]:
+    raw = get_workflow(project, name)
+    options = _base_adapter_options(raw)
+
+    parameters = raw.get("parameters") or {}
+    if not isinstance(parameters, dict):
+        raise ConfigError(f"workflow {name} parameters must be a mapping", fix="Use key/value parameters.")
+    _copy(parameters, options, "seed", "seed")
+    _copy(parameters, options, "steps", "steps")
+    _copy(parameters, options, "guidance_scale", "guidance_scale")
+
+    uploads = raw.get("uploads") or {}
+    if uploads:
+        if not isinstance(uploads, dict):
+            raise ConfigError(f"workflow {name} uploads must be a mapping", fix="Use upload option key/value fields.")
+        _copy(uploads, options, "endpoint", "upload_endpoint")
+        _copy(uploads, options, "video_field", "video_upload_field")
+        _copy(uploads, options, "audio_field", "audio_upload_field")
+        _copy(uploads, options, "type", "upload_type")
+
+    nodes = raw.get("nodes") or {}
+    if not isinstance(nodes, dict):
+        raise ConfigError(f"workflow {name} nodes must be a mapping", fix="Use named node mappings.")
+    _node(nodes, options, "video", "video_node", "video_input")
+    _node(nodes, options, "audio", "audio_node", "audio_input")
+    _node(nodes, options, "seed", "seed_node", "seed_input")
+    _output_node(nodes, options)
+    _steps_node(nodes, options)
+    return options
+
+
 def _base_adapter_options(raw: dict[str, Any]) -> dict[str, Any]:
     options: dict[str, Any] = {}
     _copy(raw, options, "base_url", "base_url")

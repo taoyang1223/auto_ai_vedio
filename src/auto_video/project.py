@@ -150,6 +150,7 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
         default_video_provider=str(data.get("default_video_provider", "mock")),
         default_image_provider=str(data.get("default_image_provider", "mock")),
         default_audio_provider=str(data.get("default_audio_provider", "mock")),
+        default_lipsync_provider=str(data.get("default_lipsync_provider", "mock")),
         render=_render_config(data),
         providers=_provider_configs(data),
         remote_profiles=_remote_profiles(data),

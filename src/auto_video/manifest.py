@@ -38,11 +38,16 @@ class ManifestStore:
     def record_asset(self, result: AssetResult) -> None:
         shot = self.data["shots"].setdefault(result.shot_id, {})
         shot["status"] = result.status
-        shot["provider"] = result.provider
+        if result.kind == "lipsync_clip":
+            shot["lipsync_provider"] = result.provider
+        else:
+            shot["provider"] = result.provider
         if result.kind == "image":
             shot["image"] = self._relative(result.path)
         elif result.kind == "clip":
             shot["clip"] = self._relative(result.path)
+        elif result.kind == "lipsync_clip":
+            shot["lipsync_clip"] = self._relative(result.path)
         elif result.kind == "audio":
             shot["audio"] = self._relative(result.path)
         else:

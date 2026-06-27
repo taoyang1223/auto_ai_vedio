@@ -39,7 +39,9 @@ def probe_project(
             stretch_ratio = round(float(shot.duration) / float(manifest_duration), 3)
         shot_report = {
             "id": shot.id,
-            "clip": entry.get("clip"),
+            "clip": entry.get("lipsync_clip") or entry.get("clip"),
+            "source_clip": entry.get("clip"),
+            "lipsync_clip": entry.get("lipsync_clip"),
             "target_duration": shot.duration,
             "manifest_duration": manifest_duration,
             "stretch_ratio": stretch_ratio,
@@ -48,7 +50,7 @@ def probe_project(
         quality = _probe_clip(
             project,
             shot_id=shot.id,
-            clip=entry.get("clip"),
+            clip=entry.get("lipsync_clip") or entry.get("clip"),
             target_duration=shot.duration,
             dry_run=dry_run,
             runner=media_runner,

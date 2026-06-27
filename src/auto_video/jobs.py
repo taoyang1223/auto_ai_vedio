@@ -8,7 +8,7 @@ from typing import Any
 from .errors import ConfigError, ProviderError
 from .models import AssetResult
 
-JOB_KINDS = {"image", "video", "audio"}
+JOB_KINDS = {"image", "video", "audio", "lipsync"}
 JOB_STATUSES = {"planned", "queued", "running", "succeeded", "failed", "retryable_failed"}
 
 
@@ -36,6 +36,8 @@ def relative_output_path(shot_id: str, kind: str) -> str:
         return f"generated/images/{shot_id}.png"
     if kind == "video":
         return f"generated/clips/{shot_id}.mp4"
+    if kind == "lipsync":
+        return f"generated/lipsync/{shot_id}.mp4"
     return f"generated/audio/{shot_id}.wav"
 
 
@@ -43,6 +45,8 @@ def legacy_asset_kind(kind: str) -> str:
     _require_value(kind, JOB_KINDS, "job kind")
     if kind == "video":
         return "clip"
+    if kind == "lipsync":
+        return "lipsync_clip"
     return kind
 
 

@@ -69,6 +69,42 @@ def test_render_plan_uses_manifest_clip(demo_project_files):
     assert plan["ffmpeg"][-1].endswith("renders/final.mp4")
 
 
+def test_render_plan_prefers_lipsync_clip_when_available(demo_project_files):
+    original = demo_project_files / "generated" / "clips" / "S01.mp4"
+    synced = demo_project_files / "generated" / "lipsync" / "S01.mp4"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    synced.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"original")
+    synced.write_bytes(b"synced")
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {
+                    "S01": {
+                        "status": "generated",
+                        "clip": "generated/clips/S01.mp4",
+                        "lipsync_clip": "generated/lipsync/S01.mp4",
+                    }
+                },
+                "renders": {},
+                "jobs": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = build_render_plan(load_project(demo_project_files))
+
+    assert plan["shots"][0]["clip"] == "generated/lipsync/S01.mp4"
+    assert plan["shots"][0]["source_clip"] == "generated/clips/S01.mp4"
+    assert plan["shots"][0]["lipsync_clip"] == "generated/lipsync/S01.mp4"
+
+
 def test_assemble_project_runs_ffmpeg_and_records_render(demo_project_files):
     project = load_project(demo_project_files)
     generate_videos(project, provider_name="mock", dry_run=False)
@@ -193,6 +229,43 @@ def test_probe_reports_media_quality_ok(demo_project_files):
         "media_fps",
     ]
     assert runner.probed
+
+
+def test_probe_prefers_lipsync_clip_when_available(demo_project_files):
+    original = demo_project_files / "generated" / "clips" / "S01.mp4"
+    synced = demo_project_files / "generated" / "lipsync" / "S01.mp4"
+    original.parent.mkdir(parents=True, exist_ok=True)
+    synced.parent.mkdir(parents=True, exist_ok=True)
+    original.write_bytes(b"original")
+    synced.write_bytes(b"synced")
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {
+                    "S01": {
+                        "status": "generated",
+                        "clip": "generated/clips/S01.mp4",
+                        "lipsync_clip": "generated/lipsync/S01.mp4",
+                    }
+                },
+                "renders": {},
+                "jobs": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    runner = FakeMediaProbeRunner(_ffprobe_payload())
+
+    report = probe_project(load_project(demo_project_files), runner=runner)
+
+    assert report["shots"][0]["clip"] == "generated/lipsync/S01.mp4"
+    assert report["shots"][0]["source_clip"] == "generated/clips/S01.mp4"
+    assert runner.probed[0].as_posix().endswith("generated/lipsync/S01.mp4")
 
 
 def test_probe_flags_bad_media_quality(demo_project_files):

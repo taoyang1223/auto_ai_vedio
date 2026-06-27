@@ -23,6 +23,7 @@ COMMON_DIRECTORIES = (
     "generated/images",
     "generated/clips",
     "generated/audio",
+    "generated/lipsync",
     "renders",
     "reports",
 )
@@ -35,6 +36,7 @@ fps: 30
 default_video_provider: mock
 default_image_provider: mock
 default_audio_provider: mock
+default_lipsync_provider: mock
 prompt_profile:
   subject: A tired desk worker discovering a simple product promise
   character: Same person across the shot, natural posture and consistent clothing
@@ -96,6 +98,7 @@ fps: 16
 default_video_provider: comfyui_wan
 default_image_provider: comfyui_image
 default_audio_provider: local_tts
+default_lipsync_provider: comfyui_lipsync
 prompt_profile:
   subject: 专注的 AI 视频创作者与自动化影像工作台
   character: 同一位创作者，现代简洁穿着，沉稳自信，动作自然
@@ -153,6 +156,24 @@ providers:
       - "42"
       - --steps
       - "20"
+  comfyui_lipsync:
+    mode: external_command
+    timeout_seconds: 3600
+    max_attempts: 1
+    command:
+      - python
+      - -m
+      - auto_video.comfyui_lipsync_adapter
+      - --base-url-env
+      - COMFYUI_LIPSYNC_BASE_URL
+      - --workflow-env
+      - COMFYUI_LIPSYNC_WORKFLOW
+      - --workflow-profile-env
+      - COMFYUI_LIPSYNC_WORKFLOW_PROFILE
+      - --timeout
+      - "1800"
+      - --seed
+      - "42"
   local_tts:
     mode: local_tts
     timeout_seconds: 240
@@ -266,6 +287,43 @@ comfyui_workflows:
           - "229"
         steps_input: steps
         cfg_input: cfg
+  lipsync_video_audio:
+    title: 视频配音口型同步
+    provider: comfyui_lipsync
+    kind: lipsync
+    base_url: http://127.0.0.1:6006
+    base_url_env: COMFYUI_LIPSYNC_BASE_URL
+    workflow_env: COMFYUI_LIPSYNC_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/L20-视频配音口型同步.json
+    profile_env: COMFYUI_LIPSYNC_WORKFLOW_PROFILE
+    tags:
+      - lipsync
+      - video-audio
+      - autodl
+      - rtx5090
+    models:
+      lipsync: ComfyUI 口型驱动工作流
+    recommended_gpu:
+      name: RTX 5090
+      vram_gb: 32
+      count: 1
+    parameters:
+      seed: 42
+    uploads:
+      endpoint: /upload/image
+      video_field: image
+      audio_field: image
+      type: input
+    nodes:
+      video:
+        id: "video"
+        input: video
+      audio:
+        id: "audio"
+        input: audio
+      output:
+        id: "output"
+        filename_prefix_input: filename_prefix
 remote_profiles:
   autodl_5090:
     host: "root@<autodl-host>"
@@ -282,6 +340,9 @@ remote_profiles:
       COMFYUI_BASE_URL: http://127.0.0.1:6006
       COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
       COMFYUI_WORKFLOW_PROFILE: wan2_2_smoothmix_i2v
+      COMFYUI_LIPSYNC_BASE_URL: http://127.0.0.1:6006
+      COMFYUI_LIPSYNC_WORKFLOW: /root/zealman-app/workflows/L20-视频配音口型同步.json
+      COMFYUI_LIPSYNC_WORKFLOW_PROFILE: lipsync_video_audio
 """
 
 AUTODL_SHOTS_JSON = """{

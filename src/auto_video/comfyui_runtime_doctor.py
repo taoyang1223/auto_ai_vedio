@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url-env")
     parser.add_argument("--workflow")
     parser.add_argument("--workflow-env")
-    parser.add_argument("--mode", choices=["wan_video", "image"], default="wan_video")
+    parser.add_argument("--mode", choices=["wan_video", "image", "lipsync"], default="wan_video")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--require-gpu", action="store_true")
     parser.add_argument("--require-idle", action="store_true")
@@ -43,6 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--height-input", default="height")
     parser.add_argument("--output-node", default="499")
     parser.add_argument("--video-node", default="230")
+    parser.add_argument("--video-input", default="video")
+    parser.add_argument("--audio-node", default="audio")
+    parser.add_argument("--audio-input", default="audio")
     parser.add_argument("--frame-rate-input", default="frame_rate")
     parser.add_argument("--filename-prefix-input", default="filename_prefix")
     parser.add_argument("--steps-node", action="append", default=["228", "229"])
@@ -237,6 +240,12 @@ def _required_inputs(args: argparse.Namespace) -> dict[str, tuple[str, str]]:
             "width": (args.size_node, args.width_input),
             "height": (args.size_node, args.height_input),
             "image_filename_prefix": (args.output_node, args.filename_prefix_input),
+        }
+    if args.mode == "lipsync":
+        return {
+            "source_video": (args.video_node, args.video_input),
+            "source_audio": (args.audio_node, args.audio_input),
+            "lipsync_filename_prefix": (args.output_node, args.filename_prefix_input),
         }
     return {
         "image": (args.image_node, args.image_input),

@@ -51,6 +51,8 @@ def _shot_has_kind_output(kind: str, shot: dict[str, Any]) -> bool:
         return bool(shot.get("image"))
     if kind == "audio":
         return bool(shot.get("audio"))
+    if kind == "lipsync":
+        return bool(shot.get("lipsync_clip"))
     return False
 
 

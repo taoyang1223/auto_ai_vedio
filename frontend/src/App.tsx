@@ -604,7 +604,7 @@ function ProductionStatus({
 }) {
   const steps = productionSteps(detail, tasks);
   return (
-    <section className="grid grid-cols-8 gap-3 max-2xl:grid-cols-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
+    <section className="grid grid-cols-9 gap-3 max-2xl:grid-cols-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
       {steps.map((step) => {
         const Icon = step.icon;
         return (
@@ -639,6 +639,8 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
   const generatedVoice = detail.shots_detail.filter((shot) => Boolean(generatedAudioRef(shot))).length;
   const staleVoice = detail.shots_detail.filter((shot) => shot.voice_freshness?.status === "stale").length;
+  const syncedShots = detail.shots_detail.filter((shot) => Boolean(lipsyncClipRef(shot))).length;
+  const staleLipsync = detail.shots_detail.filter((shot) => shot.lipsync_freshness?.status === "stale").length;
   const profileFilled = Object.values(detail.prompt_profile || {}).filter((value) => String(value || "").trim()).length;
   const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
   const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
@@ -683,6 +685,14 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       metric: staleVoice ? `${staleVoice} 条需更新` : generatedVoice ? `${generatedVoice}/${totalShots} 已生成` : "未生成",
       status: staleVoice ? "warn" : totalShots > 0 && generatedVoice === totalShots ? "done" : generatedVoice > 0 ? "warn" : "pending",
       tab: "voice",
+      icon: Mic2
+    },
+    {
+      key: "lipsync",
+      label: "口型同步",
+      metric: staleLipsync ? `${staleLipsync} 条需更新` : syncedShots ? `${syncedShots}/${totalShots} 已同步` : "等待视频和配音",
+      status: staleLipsync ? "warn" : totalShots > 0 && syncedShots === totalShots ? "done" : syncedShots > 0 ? "warn" : "pending",
+      tab: "run",
       icon: Mic2
     },
     {
@@ -1935,6 +1945,7 @@ function VoicePanel() {
   const generated = project.shots_detail.filter((shot) => Boolean(generatedAudioRef(shot))).length;
   const stale = project.shots_detail.filter((shot) => shot.voice_freshness?.status === "stale").length;
   const provider = project.config.default_audio_provider || "local_tts";
+  const lipsyncProvider = project.config.default_lipsync_provider || "mock";
 
   function updateShot(index: number, patch: Partial<Shot>) {
     const next = project.shots_detail.map((shot, itemIndex) => (itemIndex === index ? { ...shot, ...patch } : shot));
@@ -1997,6 +2008,15 @@ function VoicePanel() {
             >
               {busy === "生成/更新配音" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
               生成/更新配音
+            </button>
+            <button
+              className="btn"
+              disabled={Boolean(busy)}
+              onClick={() => enqueue("lipsync", "口型同步", { provider: lipsyncProvider, skip_succeeded: true })}
+              type="button"
+            >
+              {busy === "口型同步" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
+              口型同步
             </button>
             <button className="btn" disabled={saving} onClick={save} type="button">
               {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
@@ -2285,7 +2305,8 @@ function SortableShotCard({
   const { enqueueTask, setMessage, uploadFrame } = useAppStore();
   const style = { transform: CSS.Transform.toString(transform), transition };
   const firstFrame = firstFrameRef(shot);
-  const generatedClip = generatedClipRef(shot);
+  const generatedClip = finalClipRef(shot);
+  const syncedClip = lipsyncClipRef(shot);
   const generationStatus = shotGenerationStatus(shot);
   const [rerunning, setRerunning] = useState(false);
   const [rerunError, setRerunError] = useState("");
@@ -2343,7 +2364,7 @@ function SortableShotCard({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <Film size={17} className="text-teal-700" />
-                生成结果
+                {syncedClip ? "口型同步结果" : "生成结果"}
               </div>
               <a className="btn h-8 px-2 text-xs" href={mediaUrl(projectName, generatedClip)} target="_blank" rel="noreferrer">
                 <Eye size={14} />
@@ -2413,6 +2434,7 @@ function ReviewPanel() {
   const remoteProfile = detail.remote_profiles_detail[0]?.name || "";
   const projectName = detail.name;
   const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
+  const syncedShots = detail.shots_detail.filter((shot) => Boolean(lipsyncClipRef(shot))).length;
   const finalRender = detail.renders.final;
 
   async function enqueue(action: string, label: string, payload: Record<string, unknown>) {
@@ -2438,7 +2460,7 @@ function ReviewPanel() {
               成片审看
             </div>
             <div className="mt-1 text-xs text-slate-500">
-              {generatedShots}/{detail.shots_detail.length} 分镜已生成 · {finalRender?.path ? "成片已生成" : "未合成"}
+              分镜 {generatedShots}/{detail.shots_detail.length} · 口型 {syncedShots}/{detail.shots_detail.length} · {finalRender?.path ? "成片已生成" : "未合成"}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -2492,6 +2514,36 @@ function ReviewPanel() {
               {busy === "generate" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
               生成配音
             </button>
+            <button
+              className="btn"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                enqueue("lipsync", "口型同步", {
+                  provider: detail.config.default_lipsync_provider,
+                  skip_succeeded: true
+                })
+              }
+              type="button"
+            >
+              {busy === "lipsync" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
+              口型同步
+            </button>
+            <button
+              className="btn"
+              disabled={Boolean(busy) || !remoteProfile}
+              onClick={() =>
+                enqueue("remote-run", "远程口型同步", {
+                  profile: remoteProfile,
+                  provider: detail.config.default_lipsync_provider,
+                  kind: "lipsync",
+                  skip_succeeded: true
+                })
+              }
+              type="button"
+            >
+              {busy === "remote-run" ? <Loader2 className="animate-spin" size={17} /> : <Cloud size={17} />}
+              远程口型
+            </button>
             <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("continuity", "提取连续性", { force: true })} type="button">
               {busy === "continuity" ? <Loader2 className="animate-spin" size={17} /> : <Copy size={17} />}
               提取连续性
@@ -2516,6 +2568,7 @@ function ReviewPanel() {
           <ReviewShotCard
             key={shot.id}
             defaultProvider={detail.config.default_video_provider}
+            defaultLipsyncProvider={detail.config.default_lipsync_provider}
             projectName={detail.name}
             remoteProfile={remoteProfile}
             shot={shot}
@@ -2528,29 +2581,33 @@ function ReviewPanel() {
 
 function ReviewShotCard({
   defaultProvider,
+  defaultLipsyncProvider,
   projectName,
   remoteProfile,
   shot
 }: {
   defaultProvider: string;
+  defaultLipsyncProvider: string;
   projectName: string;
   remoteProfile: string;
   shot: Shot;
 }) {
   const { enqueueTask, setMessage } = useAppStore();
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const firstFrame = firstFrameRef(shot);
-  const generatedClip = generatedClipRef(shot);
+  const generatedClip = finalClipRef(shot);
+  const lipsyncClip = lipsyncClipRef(shot);
   const generatedAudio = generatedAudioRef(shot);
   const generationStatus = shotGenerationStatus(shot);
+  const lipsyncStatus = lipsyncGenerationStatus(shot);
 
   async function rerunShot() {
     if (!remoteProfile) {
       setError("请先在工作流配置里填写远程机器");
       return;
     }
-    setBusy(true);
+    setBusy("video");
     setError("");
     try {
       await enqueueTask(
@@ -2563,7 +2620,28 @@ function ReviewShotCard({
     } catch (failure) {
       setError(String((failure as Error).message || failure));
     } finally {
-      setBusy(false);
+      setBusy("");
+    }
+  }
+
+  async function syncShot() {
+    setBusy("lipsync");
+    setError("");
+    try {
+      const remote = remoteProfile && defaultLipsyncProvider !== "mock";
+      await enqueueTask(
+        projectName,
+        remote ? "remote-run" : "lipsync",
+        remote
+          ? { profile: remoteProfile, provider: defaultLipsyncProvider, kind: "lipsync", only: [shot.id], skip_succeeded: false }
+          : { provider: defaultLipsyncProvider, only: [shot.id], skip_succeeded: false },
+        `${shot.id} 口型同步`
+      );
+      setMessage(`${shot.id} 口型同步已加入队列`);
+    } catch (failure) {
+      setError(String((failure as Error).message || failure));
+    } finally {
+      setBusy("");
     }
   }
 
@@ -2575,12 +2653,20 @@ function ReviewShotCard({
             <span className="text-lg font-bold text-teal-700">{shot.id}</span>
             <span className="truncate text-sm font-semibold text-slate-900">{shot.title}</span>
           </div>
-          <div className="mt-0.5 text-xs text-slate-500">{shotGenerationLabel(generationStatus, Boolean(generatedClip))}</div>
+          <div className="mt-0.5 text-xs text-slate-500">
+            {lipsyncClip ? lipsyncGenerationLabel(lipsyncStatus) : shotGenerationLabel(generationStatus, Boolean(generatedClip))}
+          </div>
         </div>
-        <button className="btn h-9 px-2 text-xs" disabled={busy} onClick={rerunShot} type="button">
-          {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
-          重跑
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button className="btn h-9 px-2 text-xs" disabled={Boolean(busy)} onClick={syncShot} type="button">
+            {busy === "lipsync" ? <Loader2 className="animate-spin" size={15} /> : <Mic2 size={15} />}
+            同步口型
+          </button>
+          <button className="btn h-9 px-2 text-xs" disabled={Boolean(busy)} onClick={rerunShot} type="button">
+            {busy === "video" ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
+            重跑
+          </button>
+        </div>
       </div>
       <div className="grid gap-3 p-4">
         {generatedClip ? (
@@ -2948,10 +3034,22 @@ function RunPanel() {
     { key: "voice-plan", label: "配音计划", icon: Mic2, action: "jobs-plan", payload: { provider: project.config.default_audio_provider, kind: "audio", skip_succeeded: true } },
     { key: "voice-generate", label: "生成配音", icon: Mic2, action: "generate", payload: { provider: project.config.default_audio_provider, kind: "audio", skip_succeeded: true } },
     {
+      key: "lipsync-plan",
+      label: "口型预案",
+      icon: Mic2,
+      payload: { provider: project.config.default_lipsync_provider, skip_succeeded: true }
+    },
+    {
+      key: "lipsync",
+      label: "执行口型同步",
+      icon: Mic2,
+      payload: { provider: project.config.default_lipsync_provider, skip_succeeded: true }
+    },
+    {
       key: "remote-plan",
       label: "远程预案",
       icon: Cloud,
-      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      payload: { profile: firstRemoteProfile, provider: project.config.default_video_provider, kind: "video" },
       disabled: !firstRemoteProfile
     },
     {
@@ -2965,14 +3063,22 @@ function RunPanel() {
       key: "produce-all",
       label: "一键完整生产",
       icon: Wand2,
-      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      payload: { profile: firstRemoteProfile, provider: project.config.default_video_provider, kind: "video" },
       disabled: !firstRemoteProfile
     },
     {
       key: "remote-run",
       label: "生成剩余分镜",
       icon: Cloud,
-      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video", skip_succeeded: true },
+      payload: { profile: firstRemoteProfile, provider: project.config.default_video_provider, kind: "video", skip_succeeded: true },
+      disabled: !firstRemoteProfile
+    },
+    {
+      key: "remote-lipsync",
+      label: "远程口型同步",
+      icon: Cloud,
+      action: "remote-run",
+      payload: { profile: firstRemoteProfile, provider: project.config.default_lipsync_provider, kind: "lipsync", skip_succeeded: true },
       disabled: !firstRemoteProfile
     },
     { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
@@ -3347,6 +3453,15 @@ function generatedClipRef(shot: Shot) {
   return typeof clip === "string" ? clip : "";
 }
 
+function lipsyncClipRef(shot: Shot) {
+  const clip = shot.manifest?.lipsync_clip;
+  return typeof clip === "string" ? clip : "";
+}
+
+function finalClipRef(shot: Shot) {
+  return lipsyncClipRef(shot) || generatedClipRef(shot);
+}
+
 function generatedAudioRef(shot: Shot) {
   const audio = shot.manifest?.audio;
   return typeof audio === "string" ? audio : "";
@@ -3395,6 +3510,18 @@ function VoiceStatusPill({ status }: { status: ReturnType<typeof voiceGeneration
   return <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs ${className}`}>{voiceGenerationLabel(status)}</span>;
 }
 
+function lipsyncGenerationStatus(shot: Shot) {
+  return shot.lipsync_freshness?.status || (lipsyncClipRef(shot) ? "generated" : "pending");
+}
+
+function lipsyncGenerationLabel(status: ReturnType<typeof lipsyncGenerationStatus>) {
+  return {
+    generated: "口型已同步",
+    stale: "视频或配音变化，需重跑",
+    pending: "未同步口型"
+  }[status];
+}
+
 function mediaUrl(projectName: string, path: string) {
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   return `/media/${encodeURIComponent(projectName)}/${encoded}`;
@@ -3412,6 +3539,7 @@ function workflowKindLabel(value: string) {
   if (value === "image_to_video") return "图生视频";
   if (value === "text_to_video") return "文生视频";
   if (value === "video_to_video") return "视频重绘";
+  if (value === "lipsync") return "口型同步";
   return value;
 }
 

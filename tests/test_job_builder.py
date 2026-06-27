@@ -1,3 +1,5 @@
+import json
+
 from auto_video.job_builder import build_jobs
 from auto_video.project import load_project
 
@@ -26,6 +28,47 @@ def test_build_jobs_uses_only_filter(demo_project_files):
     jobs = build_jobs(project, kind="video", provider_name="mock", only={"S99"})
 
     assert jobs == []
+
+
+def test_build_lipsync_job_includes_source_video_and_audio_refs(demo_project_files):
+    clip = demo_project_files / "generated" / "clips" / "S01.mp4"
+    audio = demo_project_files / "generated" / "audio" / "S01.wav"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    audio.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"clip")
+    audio.write_bytes(b"audio")
+    (demo_project_files / "manifest.json").write_text(
+        json.dumps(
+            {
+                "project": "demo_ad",
+                "schema_version": "0.1",
+                "assets": {},
+                "shots": {
+                    "S01": {
+                        "status": "generated",
+                        "clip": "generated/clips/S01.mp4",
+                        "audio": "generated/audio/S01.wav",
+                    }
+                },
+                "renders": {},
+                "jobs": {},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    job = build_jobs(project, kind="lipsync", provider_name="mock")[0]
+    refs = {(ref.type, ref.role): ref for ref in job.refs}
+
+    assert job.id == "demo_ad:S01:lipsync:mock"
+    assert job.output_path == "generated/lipsync/S01.mp4"
+    assert refs[("video", "source_video")].path == "generated/clips/S01.mp4"
+    assert refs[("audio", "source_audio")].path == "generated/audio/S01.wav"
+    assert refs[("video", "source_video")].exists is True
+    assert "Late night again" in job.prompt
 
 
 def test_build_jobs_injects_project_prompt_profile(demo_project_files):

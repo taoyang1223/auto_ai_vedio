@@ -54,9 +54,9 @@ def build_tail_frame_tasks(project: Project) -> list[TailFrameTask]:
     shots = project.manifest.get("shots", {}) if isinstance(project.manifest, dict) else {}
     for current, nxt in zip(project.shots, project.shots[1:]):
         shot_record = shots.get(current.id) if isinstance(shots, dict) else None
-        if not isinstance(shot_record, dict) or not shot_record.get("clip"):
+        if not isinstance(shot_record, dict) or not (shot_record.get("lipsync_clip") or shot_record.get("clip")):
             continue
-        clip = resolve_project_path(project.config.root, str(shot_record["clip"]))
+        clip = resolve_project_path(project.config.root, str(shot_record.get("lipsync_clip") or shot_record["clip"]))
         output = project.config.root / "assets" / "continuity" / f"{current.id}_tail.png"
         tasks.append(TailFrameTask(shot_id=current.id, next_shot_id=nxt.id, clip=clip, output=output))
     return tasks
