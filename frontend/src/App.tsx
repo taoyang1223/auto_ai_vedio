@@ -1,0 +1,647 @@
+import {
+  closestCenter,
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  rectSortingStrategy,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import {
+  Activity,
+  AlertCircle,
+  Boxes,
+  CheckCircle2,
+  ChevronRight,
+  Clapperboard,
+  Cloud,
+  Code2,
+  Eye,
+  Film,
+  GripVertical,
+  ImagePlus,
+  LayoutDashboard,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCcw,
+  Save,
+  Settings,
+  Sparkles,
+  UploadCloud,
+  Wand2
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { runProjectAction } from "./api";
+import { useAppStore } from "./store";
+import type { Shot } from "./types";
+
+type TabKey = "shots" | "workflow" | "run" | "config";
+
+const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
+  { key: "shots", label: "分镜", icon: Clapperboard },
+  { key: "workflow", label: "工作流", icon: Boxes },
+  { key: "run", label: "运行", icon: Play },
+  { key: "config", label: "配置", icon: Settings }
+];
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/projects/:projectName" element={<ConsoleShell />} />
+      <Route path="*" element={<ConsoleShell />} />
+    </Routes>
+  );
+}
+
+function ConsoleShell() {
+  const navigate = useNavigate();
+  const { projectName } = useParams();
+  const {
+    activeProject,
+    boot,
+    detail,
+    loading,
+    projects,
+    selectProject,
+    templates,
+    workspace
+  } = useAppStore();
+  const [bootError, setBootError] = useState("");
+
+  useEffect(() => {
+    boot().catch((error) => setBootError(String(error.message || error)));
+  }, [boot]);
+
+  useEffect(() => {
+    if (projectName && projectName !== activeProject) {
+      selectProject(projectName).catch((error) => setBootError(String(error.message || error)));
+    }
+  }, [projectName, activeProject, selectProject]);
+
+  useEffect(() => {
+    if (!projectName && activeProject) {
+      navigate(`/projects/${encodeURIComponent(activeProject)}`, { replace: true });
+    }
+  }, [activeProject, navigate, projectName]);
+
+  const currentName = projectName || activeProject || "";
+
+  return (
+    <div className="min-h-screen bg-mist text-ink">
+      <TopBar />
+      <div className="grid min-h-[calc(100vh-72px)] grid-cols-[304px_1fr] max-lg:grid-cols-1">
+        <ProjectSidebar active={currentName} projects={projects} workspace={workspace} />
+        <main className="min-w-0 px-6 py-5 max-lg:px-4">
+          {bootError ? <Notice tone="bad" title="启动失败" body={bootError} /> : null}
+          {loading && !detail ? <LoadingState /> : null}
+          {!loading && !detail ? <EmptyState hasTemplates={templates.length > 0} /> : null}
+          {detail ? <ProjectConsole /> : null}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function TopBar() {
+  const { createNewProject, templates } = useAppStore();
+  const navigate = useNavigate();
+  const [name, setName] = useState("new_project");
+  const [template, setTemplate] = useState("autodl_comfyui_wan");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (templates.length && !templates.some((item) => item.name === template)) {
+      setTemplate(templates[0].name);
+    }
+  }, [template, templates]);
+
+  async function handleCreate(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await createNewProject(name.trim(), template);
+      navigate(`/projects/${encodeURIComponent(name.trim())}`);
+    } catch (err) {
+      setError(String((err as Error).message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <div className="flex h-[72px] items-center justify-between gap-4 px-6 max-lg:h-auto max-lg:flex-col max-lg:items-stretch max-lg:py-4">
+        <Link to="/" className="flex min-w-0 items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-lg bg-teal-700 text-white">
+            <Wand2 size={22} />
+          </div>
+          <div className="min-w-0">
+            <div className="text-lg font-semibold">自动影像工厂</div>
+            <div className="truncate text-xs text-slate-500">Auto AI Video 控制台</div>
+          </div>
+        </Link>
+        <form className="flex items-center gap-2 max-md:flex-wrap" onSubmit={handleCreate}>
+          <input
+            className="control w-48"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            aria-label="项目名称"
+          />
+          <select className="control w-56" value={template} onChange={(event) => setTemplate(event.target.value)}>
+            {templates.map((item) => (
+              <option key={item.name} value={item.name}>
+                {templateLabel(item.name)}
+              </option>
+            ))}
+          </select>
+          <button className="btn btn-primary" disabled={busy} type="submit" title="新建项目">
+            {busy ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
+            新建
+          </button>
+        </form>
+      </div>
+      {error ? <div className="border-t border-red-100 bg-red-50 px-6 py-2 text-sm text-red-700">{error}</div> : null}
+    </header>
+  );
+}
+
+function ProjectSidebar({ active, projects, workspace }: { active: string; projects: ReturnType<typeof useAppStore.getState>["projects"]; workspace: string }) {
+  return (
+    <aside className="border-r border-slate-200 bg-white max-lg:border-b max-lg:border-r-0">
+      <div className="flex h-full flex-col">
+        <div className="border-b border-slate-100 px-5 py-4">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            <LayoutDashboard size={17} />
+            项目
+          </div>
+          <div className="mt-1 truncate text-xs text-slate-500">{workspace}</div>
+        </div>
+        <div className="grid gap-2 overflow-auto p-3 max-lg:max-h-56">
+          {projects.map((project) => (
+            <Link
+              key={project.name}
+              to={`/projects/${encodeURIComponent(project.name)}`}
+              className={`group rounded-lg border p-3 transition ${
+                project.name === active
+                  ? "border-teal-300 bg-teal-50"
+                  : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-900">{project.title || project.name}</div>
+                  <div className="mt-1 truncate text-xs text-slate-500">
+                    {project.shots || 0} 个分镜 · {project.provider || "未配置"}
+                  </div>
+                </div>
+                <ChevronRight className="mt-0.5 text-slate-400 transition group-hover:translate-x-0.5" size={16} />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ProjectConsole() {
+  const { detail } = useAppStore();
+  const [tab, setTab] = useState<TabKey>("shots");
+  if (!detail) return null;
+
+  const metrics = [
+    { label: "分镜", value: detail.shots_detail.length },
+    { label: "尺寸", value: `${detail.config.width}x${detail.config.height}` },
+    { label: "帧率", value: detail.config.fps },
+    { label: "工作流", value: detail.workflows_detail.length },
+    { label: "远程", value: detail.remote_profiles_detail.length }
+  ];
+
+  return (
+    <div className="grid gap-5">
+      <section className="panel overflow-hidden">
+        <div className="flex items-center justify-between gap-5 px-5 py-5 max-xl:flex-col max-xl:items-stretch">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+              <Sparkles size={15} />
+              项目工作台
+            </div>
+            <h1 className="mt-2 truncate text-2xl font-semibold text-slate-950">{detail.title || detail.name}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+              <span>{detail.config.default_video_provider}</span>
+              <span className="h-1 w-1 rounded-full bg-slate-300" />
+              <span>{detail.config.aspect_ratio}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-5 gap-2 max-md:grid-cols-2">
+            {metrics.map((metric) => (
+              <div key={metric.label} className="h-[76px] min-w-[112px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="truncate text-xl font-semibold text-slate-950">{metric.value}</div>
+                <div className="mt-1 text-xs text-slate-500">{metric.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <nav className="flex flex-wrap gap-2">
+        {tabItems.map((item) => {
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.key}
+              className={`btn ${tab === item.key ? "btn-soft" : ""}`}
+              onClick={() => setTab(item.key)}
+              type="button"
+            >
+              <Icon size={17} />
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {tab === "shots" ? <ShotsPanel /> : null}
+      {tab === "workflow" ? <WorkflowPanel /> : null}
+      {tab === "run" ? <RunPanel /> : null}
+      {tab === "config" ? <ConfigPanel /> : null}
+    </div>
+  );
+}
+
+function ShotsPanel() {
+  const { detail, persistShots, setMessage, setShots } = useAppStore();
+  const [saving, setSaving] = useState(false);
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+  if (!detail) return null;
+  const project = detail;
+
+  function updateShot(index: number, patch: Partial<Shot>) {
+    const next = project.shots_detail.map((shot, itemIndex) => (itemIndex === index ? { ...shot, ...patch } : shot));
+    setShots(next);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = project.shots_detail.findIndex((shot) => shot.id === active.id);
+    const newIndex = project.shots_detail.findIndex((shot) => shot.id === over.id);
+    setShots(arrayMove(project.shots_detail, oldIndex, newIndex));
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await persistShots();
+    } catch (error) {
+      setMessage(String((error as Error).message || error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm text-slate-500">拖拽分镜可调整生成顺序</div>
+        <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+          {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+          保存分镜
+        </button>
+      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={project.shots_detail.map((shot) => shot.id)} strategy={rectSortingStrategy}>
+          <div className="grid grid-cols-3 gap-4 max-2xl:grid-cols-2 max-lg:grid-cols-1">
+            {project.shots_detail.map((shot, index) => (
+              <SortableShotCard key={shot.id} index={index} projectName={project.name} shot={shot} updateShot={updateShot} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </section>
+  );
+}
+
+function SortableShotCard({
+  index,
+  projectName,
+  shot,
+  updateShot
+}: {
+  index: number;
+  projectName: string;
+  shot: Shot;
+  updateShot: (index: number, patch: Partial<Shot>) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: shot.id });
+  const { uploadFrame } = useAppStore();
+  const style = { transform: CSS.Transform.toString(transform), transition };
+  const firstFrame = firstFrameRef(shot);
+
+  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    await uploadFrame(shot.id, file);
+  }
+
+  return (
+    <article
+      ref={setNodeRef}
+      style={style}
+      className={`panel overflow-hidden ${isDragging ? "opacity-70 shadow-xl" : ""}`}
+    >
+      <div className="flex h-14 items-center gap-3 border-b border-slate-100 px-4">
+        <button className="grid h-9 w-9 place-items-center rounded-md border border-slate-200 text-slate-400" type="button" {...attributes} {...listeners} title="拖拽排序">
+          <GripVertical size={18} />
+        </button>
+        <div className="text-lg font-bold text-teal-700">{shot.id}</div>
+        <input
+          className="control h-9 min-w-0 flex-1 font-medium"
+          value={shot.title}
+          onChange={(event) => updateShot(index, { title: event.target.value })}
+          aria-label="分镜标题"
+        />
+      </div>
+      <div className="grid gap-4 p-4">
+        <div className="grid grid-cols-[132px_1fr] gap-3">
+          <div className="h-[118px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+            {firstFrame ? (
+              <img className="h-full w-full object-cover" src={mediaUrl(projectName, firstFrame)} alt={`${shot.id} 首帧`} />
+            ) : (
+              <div className="grid h-full place-items-center text-slate-400">
+                <ImagePlus size={28} />
+              </div>
+            )}
+          </div>
+          <div className="grid gap-3">
+            <LabeledInput label="Provider" value={shot.provider || ""} onChange={(value) => updateShot(index, { provider: value })} />
+            <LabeledInput
+              label="时长"
+              type="number"
+              value={String(shot.duration)}
+              onChange={(value) => updateShot(index, { duration: Number(value) })}
+            />
+          </div>
+        </div>
+        <LabeledTextarea label="画面提示词" value={shot.visual_prompt} onChange={(value) => updateShot(index, { visual_prompt: value })} />
+        <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
+          <LabeledInput label="镜头运动" value={shot.camera_motion} onChange={(value) => updateShot(index, { camera_motion: value })} />
+          <LabeledInput label="环境运动" value={shot.environment_motion} onChange={(value) => updateShot(index, { environment_motion: value })} />
+          <LabeledInput label="表演状态" value={shot.performance} onChange={(value) => updateShot(index, { performance: value })} />
+          <LabeledInput label="灯光" value={shot.lighting} onChange={(value) => updateShot(index, { lighting: value })} />
+        </div>
+        <LabeledInput label="字幕" value={shot.subtitle} onChange={(value) => updateShot(index, { subtitle: value })} />
+        <LabeledTextarea label="负面提示词" value={shot.negative_prompt} rows={3} onChange={(value) => updateShot(index, { negative_prompt: value })} />
+        <label className="btn justify-start">
+          <UploadCloud size={17} />
+          上传首帧
+          <input className="hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleUpload} />
+        </label>
+      </div>
+    </article>
+  );
+}
+
+function WorkflowPanel() {
+  const { detail } = useAppStore();
+  if (!detail) return null;
+  return (
+    <section className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
+      {detail.workflows_detail.map((workflow) => (
+        <article key={workflow.name} className="panel p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+                <Boxes size={15} />
+                {workflow.kind}
+              </div>
+              <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
+            </div>
+            <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
+          </div>
+          <dl className="mt-5 grid gap-3 text-sm">
+            <InfoRow label="Profile" value={workflow.name} />
+            <InfoRow label="Workflow" value={workflow.workflow_path || "未配置"} />
+            <InfoRow label="Base URL" value={workflow.base_url_env} />
+            <InfoRow label="环境变量" value={`${workflow.workflow_env} / ${workflow.profile_env}`} />
+          </dl>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {workflow.tags.map((tag) => (
+              <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </article>
+      ))}
+    </section>
+  );
+}
+
+function RunPanel() {
+  const { detail, setMessage } = useAppStore();
+  const [busy, setBusy] = useState("");
+  const [output, setOutput] = useState("");
+  if (!detail) return null;
+  const project = detail;
+
+  const actions = [
+    { key: "validate", label: "校验项目", icon: CheckCircle2, payload: {} },
+    { key: "jobs-plan", label: "生成计划", icon: Clapperboard, payload: { provider: project.config.default_video_provider, kind: "video" } },
+    { key: "remote-plan", label: "远程预案", icon: Cloud, payload: { profile: project.remote_profiles_detail[0], provider: "comfyui_wan", kind: "video" } },
+    { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
+    { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} }
+  ];
+
+  async function run(action: (typeof actions)[number]) {
+    setBusy(action.key);
+    setOutput("执行中...");
+    try {
+      const result = await runProjectAction(project.name, action.key, action.payload);
+      setOutput(JSON.stringify(result, null, 2));
+      setMessage(`${action.label}完成`);
+    } catch (error) {
+      setOutput(String((error as Error).message || error));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid grid-cols-[360px_1fr] gap-4 max-xl:grid-cols-1">
+      <div className="panel p-4">
+        <div className="mb-4 flex items-center gap-2 font-semibold">
+          <Activity size={18} />
+          生产动作
+        </div>
+        <div className="grid gap-2">
+          {actions.map((action) => {
+            const Icon = action.icon;
+            return (
+              <button key={action.key} className="btn justify-start" disabled={Boolean(busy)} onClick={() => run(action)} type="button">
+                {busy === action.key ? <Loader2 className="animate-spin" size={17} /> : <Icon size={17} />}
+                {action.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <pre className="min-h-[460px] overflow-auto rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100">{output || "等待运行结果"}</pre>
+    </section>
+  );
+}
+
+function ConfigPanel() {
+  const { configText, persistConfig, setMessage } = useAppStore();
+  const [text, setText] = useState(configText);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setText(configText), [configText]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await persistConfig(text);
+    } catch (error) {
+      setMessage(String((error as Error).message || error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="grid gap-3">
+      <div className="flex justify-end">
+        <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+          {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+          保存配置
+        </button>
+      </div>
+      <textarea
+        className="min-h-[620px] w-full rounded-lg border border-slate-200 bg-slate-950 p-4 font-mono text-sm leading-6 text-slate-100 outline-none focus:border-teal-500"
+        value={text}
+        onChange={(event) => setText(event.target.value)}
+        spellCheck={false}
+      />
+    </section>
+  );
+}
+
+function LabeledInput({
+  label,
+  onChange,
+  type = "text",
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  type?: string;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className="label">{label}</span>
+      <input className="control w-full" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function LabeledTextarea({
+  label,
+  onChange,
+  rows = 5,
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  rows?: number;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className="label">{label}</span>
+      <textarea className="control h-auto min-h-[112px] w-full resize-y py-2" rows={rows} value={value} onChange={(event) => onChange(event.target.value)} />
+    </label>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[96px_1fr] gap-3">
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="min-w-0 break-words text-slate-800">{value}</dd>
+    </div>
+  );
+}
+
+function Notice({ body, title, tone }: { body: string; title: string; tone: "bad" | "ok" }) {
+  return (
+    <div className={`mb-4 rounded-lg border px-4 py-3 ${tone === "bad" ? "border-red-200 bg-red-50 text-red-800" : "border-teal-200 bg-teal-50 text-teal-800"}`}>
+      <div className="flex items-start gap-2">
+        {tone === "bad" ? <AlertCircle className="mt-0.5" size={17} /> : <CheckCircle2 className="mt-0.5" size={17} />}
+        <div>
+          <div className="font-medium">{title}</div>
+          <div className="mt-1 whitespace-pre-wrap text-sm">{body}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="grid min-h-[520px] place-items-center">
+      <div className="flex items-center gap-2 text-slate-500">
+        <Loader2 className="animate-spin" size={18} />
+        加载中
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ hasTemplates }: { hasTemplates: boolean }) {
+  return (
+    <div className="grid min-h-[560px] place-items-center rounded-lg border border-dashed border-slate-300 bg-white">
+      <div className="text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-lg bg-teal-50 text-teal-700">
+          <Plus size={24} />
+        </div>
+        <div className="mt-4 text-lg font-semibold">暂无项目</div>
+        <div className="mt-1 text-sm text-slate-500">{hasTemplates ? "从右上角新建一个项目" : "模板加载中"}</div>
+      </div>
+    </div>
+  );
+}
+
+function firstFrameRef(shot: Shot) {
+  return shot.refs.find((ref) => ref.type === "image" && ref.role === "first_frame")?.path;
+}
+
+function mediaUrl(projectName: string, path: string) {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return `/media/${encodeURIComponent(projectName)}/${encoded}`;
+}
+
+function templateLabel(value: string) {
+  if (value === "autodl_comfyui_wan") return "AutoDL ComfyUI Wan";
+  if (value === "demo") return "本地演示";
+  return value;
+}
+
+export default App;

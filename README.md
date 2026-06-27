@@ -65,6 +65,24 @@ Open `http://127.0.0.1:8765` to create projects, edit shots, upload first-frame 
 
 The Web console does not replace the ComfyUI node interface. Use ComfyUI to design and debug workflows; use this console to operate repeatable projects through the `auto-video` pipeline.
 
+Phase 24 upgrades the console to a React production UI:
+
+- React 18 + TypeScript + Vite 5
+- Zustand state management
+- React Router v6
+- Tailwind CSS
+- `@dnd-kit` shot ordering
+- Lucide React icons
+- Axios API client
+
+Build the frontend after changing UI code:
+
+```bash
+cd frontend
+npm install
+npm run build
+```
+
 ## Design
 
 See `docs/superpowers/specs/2026-06-26-ai-video-cli-pipeline-design.md`.

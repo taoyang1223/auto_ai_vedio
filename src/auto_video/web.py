@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import mimetypes
 import re
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,7 +13,7 @@ from urllib.parse import unquote, urlparse
 from .errors import AutoVideoError, ConfigError
 from .pipeline import plan_jobs
 from .probe import probe_project
-from .project import load_project
+from .project import load_project, resolve_project_path
 from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
 from .remote_transport import run_remote_worker
 from .render import assemble_project
@@ -23,6 +24,7 @@ from .workflow_registry import list_workflows
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+STATIC_DIR = Path(__file__).with_name("web_static")
 
 
 def run_web_server(workspace: Path, *, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -66,7 +68,15 @@ def _handler_factory(workspace: Path):
                 parsed = urlparse(self.path)
                 path = parsed.path.rstrip("/") or "/"
                 parts = [unquote(part) for part in path.split("/") if part]
+                if parts[:1] == ["api"]:
+                    self._handle_api(method, parts[1:])
+                    return
+                if method == "GET" and parts[:1] == ["media"]:
+                    self._handle_media(parts[1:])
+                    return
                 if method == "GET" and path == "/":
+                    if self._send_static("index.html"):
+                        return
                     self._send_html(APP_HTML)
                     return
                 if method == "GET" and path == "/app.css":
@@ -75,9 +85,11 @@ def _handler_factory(workspace: Path):
                 if method == "GET" and path == "/app.js":
                     self._send_text(APP_JS, "application/javascript; charset=utf-8")
                     return
-                if parts[:1] != ["api"]:
-                    raise ConfigError("unknown route", fix="Use the web console API routes.")
-                self._handle_api(method, parts[1:])
+                if method == "GET" and self._send_static(path.lstrip("/") or "index.html"):
+                    return
+                if method == "GET" and self._send_static("index.html"):
+                    return
+                raise ConfigError("unknown route", fix="Use the web console API routes.")
             except AutoVideoError as exc:
                 self._send_json({"ok": False, "error": exc.message, "fix": exc.fix}, status=400)
             except json.JSONDecodeError as exc:
@@ -180,6 +192,16 @@ def _handler_factory(workspace: Path):
                 return
             raise ConfigError("unknown project API route", fix="Refresh the web console and retry.")
 
+        def _handle_media(self, parts: list[str]) -> None:
+            if len(parts) < 2:
+                raise ConfigError("invalid media route", fix="Use /media/<project>/<relative-path>.")
+            project_root = _project_path(workspace, parts[0])
+            relative = "/".join(parts[1:])
+            media_path = resolve_project_path(project_root, relative)
+            if not media_path.exists() or not media_path.is_file():
+                raise ConfigError("media file not found", fix="Upload or regenerate the referenced asset.")
+            self._send_file(media_path)
+
         def _read_json(self) -> dict[str, Any]:
             length = int(self.headers.get("Content-Length", "0"))
             if length <= 0:
@@ -204,6 +226,27 @@ def _handler_factory(workspace: Path):
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
+
+        def _send_static(self, relative_path: str) -> bool:
+            if not STATIC_DIR.exists():
+                return False
+            candidate = (STATIC_DIR / relative_path).resolve()
+            static_root = STATIC_DIR.resolve()
+            if candidate != static_root and static_root not in candidate.parents:
+                return False
+            if not candidate.exists() or not candidate.is_file():
+                return False
+            self._send_file(candidate)
+            return True
+
+        def _send_file(self, path: Path) -> None:
+            body = path.read_bytes()
+            content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     return AutoVideoWebHandler
 

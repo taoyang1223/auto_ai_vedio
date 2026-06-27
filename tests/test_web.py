@@ -38,6 +38,11 @@ def request_text(base_url, path):
         return response.read().decode("utf-8")
 
 
+def request_bytes(base_url, path):
+    with urlopen(f"{base_url}{path}", timeout=5) as response:
+        return response.read()
+
+
 def test_web_serves_app_shell(tmp_path):
     with running_web(tmp_path) as base_url:
         html = request_text(base_url, "/")
@@ -98,3 +103,23 @@ def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     assert project.shots[0].visual_prompt == "updated web prompt"
     assert project.shots[0].refs[0].path == "assets/refs/S01_first_frame.png"
     assert uploaded["bytes"] > 0
+
+
+def test_web_serves_project_media(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        image_body = base64.b64encode(b"preview-image").decode("ascii")
+        request_json(
+            base_url,
+            "/api/projects/demo/first-frame",
+            method="POST",
+            payload={"shot_id": "S01", "filename": "frame.png", "data_base64": image_body},
+        )
+        body = request_bytes(base_url, "/media/demo/assets/refs/S01_first_frame.png")
+
+    assert body == b"preview-image"
