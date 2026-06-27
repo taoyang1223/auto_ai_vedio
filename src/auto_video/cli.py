@@ -15,6 +15,7 @@ from .render import assemble_project
 from .remote_doctor import RemoteDoctorOptions, run_remote_doctor
 from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
 from .remote_transport import run_remote_worker
+from .remote_wrapup import RemoteWrapupOptions, run_remote_wrapup
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
@@ -203,6 +204,13 @@ def build_parser() -> argparse.ArgumentParser:
     remote_doctor.add_argument("--ssh-option", action="append", default=[])
     remote_doctor.add_argument("--dry-run", action="store_true")
 
+    remote_wrapup = remote_sub.add_parser("wrapup")
+    remote_wrapup.add_argument("--host", required=True)
+    remote_wrapup.add_argument("--remote-dir", required=True)
+    remote_wrapup.add_argument("--ssh-option", action="append", default=[])
+    remote_wrapup.add_argument("--comfyui-base-url", default="http://127.0.0.1:6006")
+    remote_wrapup.add_argument("--dry-run", action="store_true")
+
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
@@ -351,6 +359,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     remote_dir=args.remote_dir,
                     remote_auto_video=args.remote_auto_video,
                     ssh_options=tuple(args.ssh_option),
+                ),
+                dry_run=args.dry_run,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0 if result["ok"] else 1
+        if args.command == "remote" and args.remote_command == "wrapup":
+            result = run_remote_wrapup(
+                RemoteWrapupOptions(
+                    host=args.host,
+                    remote_dir=args.remote_dir,
+                    ssh_options=tuple(args.ssh_option),
+                    comfyui_base_url=args.comfyui_base_url,
                 ),
                 dry_run=args.dry_run,
             )

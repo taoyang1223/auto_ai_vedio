@@ -4,6 +4,7 @@ from pathlib import Path
 
 from auto_video import remote_doctor
 from auto_video import remote_transport
+from auto_video import remote_wrapup
 from auto_video.cli import main
 from auto_video.remote_transport import CommandResult
 from auto_video.worker_runner import run_worker_bundle
@@ -36,6 +37,20 @@ class CliDoctorRunner:
         self.commands.append(command)
         if self.fail_when and self.fail_when in command:
             return CommandResult(command=command, returncode=1, stderr=f"{self.fail_when} missing")
+        return CommandResult(command=command, stdout="ok\n")
+
+
+class CliWrapupRunner:
+    def __init__(self):
+        self.commands: list[tuple[str, ...]] = []
+
+    def run(self, command):
+        command = tuple(command)
+        self.commands.append(command)
+        if "curl" in command:
+            return CommandResult(command=command, stdout='{"queue_running": [], "queue_pending": []}')
+        if "nvidia-smi" in command:
+            return CommandResult(command=command, stdout="620, 32607, 0\n")
         return CommandResult(command=command, stdout="ok\n")
 
 
@@ -121,6 +136,41 @@ def test_remote_doctor_cli_failure_returns_one(monkeypatch, capsys):
         "local_rsync",
         "remote_rsync",
     ]
+
+
+def test_remote_wrapup_cli_success_returns_release_hint(monkeypatch, capsys):
+    runner = CliWrapupRunner()
+    monkeypatch.setattr(remote_wrapup, "SubprocessDoctorCommandRunner", lambda: runner)
+
+    assert (
+        main(
+            [
+                "remote",
+                "wrapup",
+                "--host",
+                "gpu-box",
+                "--remote-dir",
+                "/data/auto-video/jobs/demo",
+                "--ssh-option",
+                "StrictHostKeyChecking=no",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert payload["ok"] is True
+    assert payload["release_recommended"] is True
+    assert payload["checks"][2]["command"] == [
+        "ssh",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "gpu-box",
+        "curl",
+        "-fsS",
+        "http://127.0.0.1:6006/queue",
+    ]
+    assert len(runner.commands) == 4
 
 
 def test_remote_cli_dry_run_prints_commands_without_manifest(tmp_path: Path, capsys):

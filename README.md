@@ -256,6 +256,17 @@ After clips are generated, extract tail frames for continuity between adjacent s
 
 The command reads generated clips from `manifest.json`, writes tail frames under `assets/continuity/`, and records `continuity_refs` on the next shot. Future job payloads then include the previous shot's tail frame before static shot refs, which lets image-to-video providers preserve subject and scene continuity across a batch.
 
+After remote generation finishes, run a wrap-up check before leaving the GPU instance online:
+
+```bash
+.venv/bin/python -m auto_video remote wrapup \
+  --host root@<autodl-host> \
+  --remote-dir /root/auto-video/jobs/demo \
+  --ssh-option Port=<ssh-port>
+```
+
+`remote wrapup` collects remote job directory size, disk free, ComfyUI queue state, and GPU utilization. When the queue and GPU are idle, it prints `release_recommended: true`; stop or release the rented instance in AutoDL to avoid continuing charges.
+
 This adapter currently targets image-to-video jobs. Each shot should include an existing image reference; the adapter uploads that image to ComfyUI, patches the workflow prompt, seed, duration, resolution, frame rate, and output prefix, then downloads the first video output from ComfyUI history.
 
 ## Cloud Worker Contract
