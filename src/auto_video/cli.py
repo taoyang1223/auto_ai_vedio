@@ -18,6 +18,7 @@ from .remote_transport import run_remote_worker
 from .remote_wrapup import RemoteWrapupOptions, run_remote_wrapup
 from .templates import init_project, list_templates
 from .validation import validate_project
+from .web import run_web_server
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
 from .workflow_registry import list_workflows, show_workflow, workflow_env_exports
@@ -172,6 +173,11 @@ def build_parser() -> argparse.ArgumentParser:
     workflows_env = workflows_sub.add_parser("env")
     workflows_env.add_argument("project")
     workflows_env.add_argument("name")
+
+    web = sub.add_parser("web")
+    web.add_argument("--workspace", default="web_projects")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8765)
     return parser
 
 
@@ -360,6 +366,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "workflows" and args.workflows_command == "env":
             exports = workflow_env_exports(load_project(args.project), args.name)
             print(json.dumps({"profile": args.name, "env": exports}, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "web":
+            run_web_server(Path(args.workspace), host=args.host, port=args.port)
             return 0
         parser.print_help()
         return 2

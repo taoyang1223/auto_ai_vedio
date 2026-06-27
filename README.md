@@ -53,6 +53,18 @@ Before running it on a rented GPU, replace the placeholder PNGs with real first-
 .venv/bin/python -m auto_video assemble wan_story
 ```
 
+## Web Console
+
+Phase 23 adds a local Web MVP for project-level production control:
+
+```bash
+.venv/bin/python -m auto_video web --workspace web_projects --host 127.0.0.1 --port 8765
+```
+
+Open `http://127.0.0.1:8765` to create projects, edit shots, upload first-frame images, inspect workflow profiles, run validation, plan jobs, generate remote dry-run commands, probe clips, and preview final assembly plans.
+
+The Web console does not replace the ComfyUI node interface. Use ComfyUI to design and debug workflows; use this console to operate repeatable projects through the `auto-video` pipeline.
+
 ## Design
 
 See `docs/superpowers/specs/2026-06-26-ai-video-cli-pipeline-design.md`.
