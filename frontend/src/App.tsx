@@ -40,6 +40,7 @@ import {
   ShieldCheck,
   Sparkles,
   Terminal,
+  Trash2,
   UploadCloud,
   Wand2,
   XCircle
@@ -52,10 +53,10 @@ import type { Shot, WebTask, WebTaskStatus } from "./types";
 type TabKey = "shots" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
-  { key: "shots", label: "分镜", icon: Clapperboard },
-  { key: "workflow", label: "工作流", icon: Boxes },
-  { key: "run", label: "运行", icon: Play },
-  { key: "config", label: "配置", icon: Settings }
+  { key: "shots", label: "分镜编排", icon: Clapperboard },
+  { key: "workflow", label: "工作流配置", icon: Boxes },
+  { key: "run", label: "任务运行", icon: Play },
+  { key: "config", label: "项目配置", icon: Settings }
 ];
 
 function App() {
@@ -178,19 +179,25 @@ function TopBar() {
         {authenticated ? (
           <div className="flex items-center gap-2 max-md:flex-wrap">
             <form className="flex items-center gap-2 max-md:flex-wrap" onSubmit={handleCreate}>
-              <input
-                className="control w-48"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                aria-label="项目名称"
-              />
-              <select className="control w-56" value={template} onChange={(event) => setTemplate(event.target.value)}>
-                {templates.map((item) => (
-                  <option key={item.name} value={item.name}>
-                    {templateLabel(item.name)}
-                  </option>
-                ))}
-              </select>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-slate-500">项目名</span>
+                <input
+                  className="control w-48"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  aria-label="项目名称"
+                />
+              </label>
+              <label className="grid gap-1">
+                <span className="text-xs font-medium text-slate-500">模板</span>
+                <select className="control w-56" value={template} onChange={(event) => setTemplate(event.target.value)}>
+                  {templates.map((item) => (
+                    <option key={item.name} value={item.name}>
+                      {templateLabel(item.name)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button className="btn btn-primary" disabled={busy} type="submit" title="新建项目">
                 {busy ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
                 新建
@@ -306,17 +313,36 @@ function ProjectSidebar({ active, projects, workspace }: { active: string; proje
 }
 
 function ProjectConsole() {
-  const { detail } = useAppStore();
+  const { deleteExistingProject, detail, setMessage } = useAppStore();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>("shots");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
   if (!detail) return null;
+  const project = detail;
 
   const metrics = [
-    { label: "分镜", value: detail.shots_detail.length },
-    { label: "尺寸", value: `${detail.config.width}x${detail.config.height}` },
-    { label: "帧率", value: detail.config.fps },
-    { label: "工作流", value: detail.workflows_detail.length },
-    { label: "远程", value: detail.remote_profiles_detail.length }
+    { label: "分镜", value: project.shots_detail.length },
+    { label: "尺寸", value: `${project.config.width}x${project.config.height}` },
+    { label: "帧率", value: project.config.fps },
+    { label: "工作流", value: project.workflows_detail.length },
+    { label: "远程", value: project.remote_profiles_detail.length }
   ];
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      const next = await deleteExistingProject(project.name);
+      setMessage("项目已删除");
+      navigate(next ? `/projects/${encodeURIComponent(next)}` : "/", { replace: true });
+    } catch (error) {
+      setDeleteError(String((error as Error).message || error));
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <div className="grid gap-5">
@@ -327,20 +353,26 @@ function ProjectConsole() {
               <Sparkles size={15} />
               项目工作台
             </div>
-            <h1 className="mt-2 truncate text-2xl font-semibold text-slate-950">{detail.title || detail.name}</h1>
+            <h1 className="mt-2 truncate text-2xl font-semibold text-slate-950">{project.title || project.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
-              <span>{detail.config.default_video_provider}</span>
+              <span>{project.config.default_video_provider}</span>
               <span className="h-1 w-1 rounded-full bg-slate-300" />
-              <span>{detail.config.aspect_ratio}</span>
+              <span>{project.config.aspect_ratio}</span>
             </div>
           </div>
-          <div className="grid grid-cols-5 gap-2 max-md:grid-cols-2">
-            {metrics.map((metric) => (
-              <div key={metric.label} className="h-[76px] min-w-[112px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                <div className="truncate text-xl font-semibold text-slate-950">{metric.value}</div>
-                <div className="mt-1 text-xs text-slate-500">{metric.label}</div>
-              </div>
-            ))}
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <div className="grid grid-cols-5 gap-2 max-md:grid-cols-2">
+              {metrics.map((metric) => (
+                <div key={metric.label} className="h-[76px] min-w-[112px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                  <div className="truncate text-xl font-semibold text-slate-950">{metric.value}</div>
+                  <div className="mt-1 text-xs text-slate-500">{metric.label}</div>
+                </div>
+              ))}
+            </div>
+            <button className="btn border-red-200 text-red-700 hover:border-red-300 hover:bg-red-50" onClick={() => setDeleteOpen(true)} type="button">
+              <Trash2 size={17} />
+              删除项目
+            </button>
           </div>
         </div>
       </section>
@@ -366,6 +398,67 @@ function ProjectConsole() {
       {tab === "workflow" ? <WorkflowPanel /> : null}
       {tab === "run" ? <RunPanel /> : null}
       {tab === "config" ? <ConfigPanel /> : null}
+      {deleteOpen ? (
+        <DeleteProjectDialog
+          busy={deleting}
+          error={deleteError}
+          projectName={project.name}
+          title={project.title || project.name}
+          onCancel={() => {
+            setDeleteOpen(false);
+            setDeleteError("");
+          }}
+          onConfirm={confirmDelete}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function DeleteProjectDialog({
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+  projectName,
+  title
+}: {
+  busy: boolean;
+  error: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  projectName: string;
+  title: string;
+}) {
+  const [typed, setTyped] = useState("");
+  const canDelete = typed === projectName;
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-slate-950/30 px-4 backdrop-blur-sm">
+      <section className="w-full max-w-md rounded-xl border border-red-100 bg-white p-5 shadow-xl">
+        <div className="flex items-start gap-3">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-red-50 text-red-700">
+            <Trash2 size={20} />
+          </div>
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold text-slate-950">删除项目</h2>
+            <div className="mt-1 break-words text-sm text-slate-500">{title}</div>
+          </div>
+        </div>
+        <label className="mt-5 grid gap-1">
+          <span className="label">输入项目名确认</span>
+          <input className="control w-full" value={typed} onChange={(event) => setTyped(event.target.value)} autoFocus />
+        </label>
+        {error ? <div className="mt-3 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+        <div className="mt-5 flex justify-end gap-2">
+          <button className="btn" onClick={onCancel} type="button">
+            取消
+          </button>
+          <button className="btn border-red-200 bg-red-600 text-white hover:bg-red-700" disabled={busy || !canDelete} onClick={onConfirm} type="button">
+            {busy ? <Loader2 className="animate-spin" size={17} /> : <Trash2 size={17} />}
+            确认删除
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -407,7 +500,7 @@ function ShotsPanel() {
   return (
     <section className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm text-slate-500">拖拽分镜可调整生成顺序</div>
+        <div className="text-sm font-medium text-slate-700">分镜列表</div>
         <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
           {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
           保存分镜
@@ -478,7 +571,7 @@ function SortableShotCard({
             )}
           </div>
           <div className="grid gap-3">
-            <LabeledInput label="Provider" value={shot.provider || ""} onChange={(value) => updateShot(index, { provider: value })} />
+            <LabeledInput label="生成服务" value={shot.provider || ""} onChange={(value) => updateShot(index, { provider: value })} />
             <LabeledInput
               label="时长"
               type="number"
@@ -517,16 +610,16 @@ function WorkflowPanel() {
             <div>
               <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
                 <Boxes size={15} />
-                {workflow.kind}
+                {workflowKindLabel(workflow.kind)}
               </div>
               <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
             </div>
             <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
           </div>
           <dl className="mt-5 grid gap-3 text-sm">
-            <InfoRow label="Profile" value={workflow.name} />
-            <InfoRow label="Workflow" value={workflow.workflow_path || "未配置"} />
-            <InfoRow label="Base URL" value={workflow.base_url_env} />
+            <InfoRow label="配置档" value={workflow.name} />
+            <InfoRow label="工作流文件" value={workflow.workflow_path || "未配置"} />
+            <InfoRow label="服务地址变量" value={workflow.base_url_env} />
             <InfoRow label="环境变量" value={`${workflow.workflow_env} / ${workflow.profile_env}`} />
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
@@ -926,8 +1019,15 @@ function mediaUrl(projectName: string, path: string) {
 }
 
 function templateLabel(value: string) {
-  if (value === "autodl_comfyui_wan") return "AutoDL ComfyUI Wan";
-  if (value === "demo") return "本地演示";
+  if (value === "autodl_comfyui_wan") return "AutoDL 视频生成模板";
+  if (value === "demo") return "本地演示模板";
+  return value;
+}
+
+function workflowKindLabel(value: string) {
+  if (value === "image_to_video") return "图生视频";
+  if (value === "text_to_video") return "文生视频";
+  if (value === "video_to_video") return "视频重绘";
   return value;
 }
 

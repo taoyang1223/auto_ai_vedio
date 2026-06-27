@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   cancelTask,
   createProject,
+  deleteProject,
   enqueueProjectTask,
   fetchAuthStatus,
   fetchConfig,
@@ -35,6 +36,7 @@ type AppState = {
   logoutSession: () => Promise<void>;
   selectProject: (name: string) => Promise<void>;
   createNewProject: (name: string, template: string) => Promise<void>;
+  deleteExistingProject: (name: string) => Promise<string | null>;
   setShots: (shots: Shot[]) => void;
   persistShots: () => Promise<void>;
   persistConfig: (text: string) => Promise<void>;
@@ -121,6 +123,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     const projectsPayload = await fetchProjects();
     set({ workspace: projectsPayload.workspace, projects: projectsPayload.projects, activeProject: name, loading: false });
     await get().selectProject(name);
+  },
+
+  deleteExistingProject: async (name: string) => {
+    set({ loading: true });
+    try {
+      await deleteProject(name);
+      const projectsPayload = await fetchProjects();
+      const next = projectsPayload.projects.find((project) => project.name !== name)?.name || null;
+      set({
+        activeProject: next,
+        configText: "",
+        detail: null,
+        loading: false,
+        projects: projectsPayload.projects,
+        tasks: [],
+        workspace: projectsPayload.workspace
+      });
+      if (next) {
+        await get().selectProject(next);
+      }
+      return next;
+    } catch (error) {
+      set({ loading: false });
+      throw error;
+    }
   },
 
   setShots: (shots: Shot[]) => {

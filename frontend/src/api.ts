@@ -44,6 +44,11 @@ export async function createProject(name: string, template: string): Promise<Pro
   return data.project;
 }
 
+export async function deleteProject(name: string): Promise<string> {
+  const { data } = await client.delete<ApiEnvelope<{ deleted: string }>>(`/api/projects/${encodeURIComponent(name)}`);
+  return data.deleted;
+}
+
 export async function fetchProject(name: string): Promise<ProjectDetail> {
   const { data } = await client.get<ApiEnvelope<{ project: ProjectDetail }>>(`/api/projects/${encodeURIComponent(name)}`);
   return data.project;

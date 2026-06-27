@@ -7,6 +7,7 @@ import json
 import mimetypes
 import os
 import re
+import shutil
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -93,6 +94,9 @@ def _handler_factory(workspace: Path, *, token: str | None):
 
         def do_PUT(self) -> None:
             self._handle("PUT")
+
+        def do_DELETE(self) -> None:
+            self._handle("DELETE")
 
         def log_message(self, format: str, *args: Any) -> None:
             return
@@ -211,6 +215,10 @@ def _handler_factory(workspace: Path, *, token: str | None):
             project_name = parts[1]
             project_root = _project_path(workspace, project_name)
             tail = parts[2:]
+            if method == "DELETE" and not tail:
+                _delete_project(project_root, task_queue.list(project=project_name))
+                self._send_json({"ok": True, "deleted": project_name})
+                return
             if method == "GET" and not tail:
                 self._send_json({"ok": True, "project": _project_detail(project_root)})
                 return
@@ -580,6 +588,15 @@ def _provider_result_summary(result: Any, root: Path) -> dict[str, Any]:
         "retryable": result.retryable,
         "metadata": result.metadata,
     }
+
+
+def _delete_project(root: Path, tasks: list[dict[str, Any]]) -> None:
+    if not root.exists() or not root.is_dir():
+        raise ConfigError("project not found", fix="Refresh the project list.")
+    active = [task for task in tasks if task.get("status") in {"queued", "running"}]
+    if active:
+        raise ConfigError("project has active tasks", fix="Wait for running tasks to finish or cancel queued tasks before deleting.")
+    shutil.rmtree(root)
 
 
 def _project_path(workspace: Path, name: str) -> Path:

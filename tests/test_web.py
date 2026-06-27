@@ -104,6 +104,22 @@ def test_web_api_creates_project_and_plans_jobs(tmp_path):
     assert planned["result"]["planned"][0]["provider"] == "comfyui_wan"
 
 
+def test_web_api_deletes_project(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "delete_me", "template": "demo"},
+        )
+        deleted = request_json(base_url, "/api/projects/delete_me", method="DELETE")
+        listed = request_json(base_url, "/api/projects")
+
+    assert deleted["deleted"] == "delete_me"
+    assert listed["projects"] == []
+    assert not (tmp_path / "delete_me").exists()
+
+
 def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(
