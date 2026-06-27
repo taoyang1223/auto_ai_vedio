@@ -21,6 +21,7 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video remote run demo_project --provider mock --kind video --host gpu-box --remote-dir /data/auto-video/jobs/demo --local-dir /tmp/av-remote-demo --dry-run
 .venv/bin/python -m auto_video generate demo_project --provider mock
 .venv/bin/python -m auto_video assemble demo_project --dry-run
+.venv/bin/python -m auto_video assemble demo_project
 .venv/bin/python -m auto_video probe demo_project --dry-run
 ```
 
@@ -39,6 +40,8 @@ Phase 2 routes generation through provider-neutral jobs:
 `jobs plan` prints deterministic job records without writing `manifest.json`.
 `jobs submit` executes the selected provider and records both legacy shot assets and provider job records in `manifest.json`.
 The mock provider stays offline and deterministic, so tests do not need API keys, network, FFmpeg, or cloud GPU access.
+
+`assemble --dry-run` validates clip readiness and prints the concat-based ffmpeg command. `assemble` writes `renders/final.mp4`, records `renders.final` in `manifest.json`, and fails early if a referenced clip is missing or empty.
 
 ## External Command Providers
 

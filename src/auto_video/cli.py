@@ -11,7 +11,7 @@ from .job_store import JobStore
 from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project
-from .render import build_render_plan
+from .render import assemble_project
 from .remote_doctor import RemoteDoctorOptions, run_remote_doctor
 from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
 from .remote_transport import run_remote_worker
@@ -250,9 +250,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "assemble":
-            plan = build_render_plan(load_project(args.project))
-            if args.dry_run:
-                print(json.dumps(plan, ensure_ascii=False, indent=2))
+            result = assemble_project(load_project(args.project), dry_run=args.dry_run)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "probe":
             report = probe_project(load_project(args.project), dry_run=args.dry_run)
