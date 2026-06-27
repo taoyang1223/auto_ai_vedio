@@ -39,11 +39,13 @@ class JobStore:
         job["retryable"] = result.retryable
         job["provider_job_id"] = result.provider_job_id
         job["error"] = result.error
-        job["metadata"] = result.metadata
         if result.path is not None:
             job["output_path"] = self.manifest._relative(result.path)
         if result.duration is not None:
             job["duration"] = result.duration
+        metadata = dict(job.get("metadata", {})) if isinstance(job.get("metadata"), dict) else {}
+        metadata.update(result.metadata)
+        job["metadata"] = metadata
         if result.status == "succeeded":
             self.manifest.record_asset(result.to_asset_result())
         elif result.status in {"failed", "retryable_failed"}:

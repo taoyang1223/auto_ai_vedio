@@ -113,3 +113,33 @@ def generate_videos(
             skip_succeeded=skip_succeeded,
         )
     )
+
+
+def generate_audio(
+    project: Project,
+    *,
+    provider_name: str | None = None,
+    dry_run: bool = False,
+    only: set[str] | None = None,
+    failed_only: bool = False,
+    skip_succeeded: bool = False,
+) -> dict[str, Any] | list[AssetResult]:
+    if dry_run:
+        return plan_jobs(
+            project,
+            kind="audio",
+            provider_name=provider_name,
+            only=only,
+            failed_only=failed_only,
+            skip_succeeded=skip_succeeded,
+        )
+    return _asset_results(
+        submit_jobs(
+            project,
+            kind="audio",
+            provider_name=provider_name,
+            only=only,
+            failed_only=failed_only,
+            skip_succeeded=skip_succeeded,
+        )
+    )

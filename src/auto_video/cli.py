@@ -8,7 +8,7 @@ from pathlib import Path
 from .errors import AutoVideoError
 from .continuity import extract_tail_frames
 from .job_store import JobStore
-from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
+from .pipeline import generate_audio, generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project
 from .render import assemble_project
@@ -58,6 +58,14 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--only")
     generate.add_argument("--failed-only", action="store_true")
     generate.add_argument("--skip-succeeded", action="store_true")
+
+    audio = sub.add_parser("audio")
+    audio.add_argument("project")
+    audio.add_argument("--dry-run", action="store_true")
+    audio.add_argument("--provider")
+    audio.add_argument("--only")
+    audio.add_argument("--failed-only", action="store_true")
+    audio.add_argument("--skip-succeeded", action="store_true")
 
     assemble = sub.add_parser("assemble")
     assemble.add_argument("project")
@@ -219,6 +227,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.command == "generate":
             result = generate_videos(
+                load_project(args.project),
+                provider_name=args.provider,
+                dry_run=args.dry_run,
+                only=_csv(args.only),
+                failed_only=args.failed_only,
+                skip_succeeded=args.skip_succeeded,
+            )
+            if args.dry_run:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "audio":
+            result = generate_audio(
                 load_project(args.project),
                 provider_name=args.provider,
                 dry_run=args.dry_run,

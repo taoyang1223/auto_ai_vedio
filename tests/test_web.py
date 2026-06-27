@@ -766,7 +766,7 @@ def test_web_task_one_click_production_runs_mock_pipeline(tmp_path):
 
     steps = [step["step"] for step in task["result"]["steps"]]
     assert task["status"] == "succeeded"
-    assert steps == ["validate", "first_frames", "videos", "probe", "assemble", "continuity"]
+    assert steps == ["validate", "first_frames", "videos", "voiceover", "probe", "assemble", "continuity"]
     assert task["result"]["steps"][2]["result"]["count"] == 1
     assert task["result"]["steps"][4]["result"]["dry_run"] is True
 

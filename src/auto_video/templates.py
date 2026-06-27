@@ -95,7 +95,7 @@ height: 544
 fps: 16
 default_video_provider: comfyui_wan
 default_image_provider: comfyui_image
-default_audio_provider: mock
+default_audio_provider: local_tts
 prompt_profile:
   subject: 专注的 AI 视频创作者与自动化影像工作台
   character: 同一位创作者，现代简洁穿着，沉稳自信，动作自然
@@ -153,6 +153,17 @@ providers:
       - "42"
       - --steps
       - "20"
+  local_tts:
+    mode: local_tts
+    timeout_seconds: 240
+    engine: edge_tts
+    command: edge-tts
+    voice: zh-CN-XiaoxiaoNeural
+    rate: +0%
+    volume: +0%
+    sample_rate: 48000
+    channels: 2
+    text_source: subtitle
 comfyui_workflows:
   qwen2512_first_frame:
     title: Qwen2512 首帧文生图
@@ -369,6 +380,7 @@ auto-video workflows show . qwen2512_first_frame
 auto-video remote run . --profile autodl_5090 --provider comfyui_image --kind image
 auto-video remote profiles .
 auto-video remote run . --profile autodl_5090 --provider comfyui_wan --kind video
+auto-video audio . --provider local_tts --skip-succeeded
 auto-video probe . --strict
 auto-video continuity extract-tail-frames .
 auto-video assemble .

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import struct
 import zlib
 from pathlib import Path
@@ -24,7 +25,7 @@ class MockProvider:
             output_path.write_text(f"mock video for {job.shot_id}\n{job.prompt}\n", encoding="utf-8")
             duration = job.duration
         else:
-            output_path.write_text(f"mock audio for {job.shot_id}\n{job.prompt}\n", encoding="utf-8")
+            output_path.write_bytes(_mock_wav(duration=job.duration or 1.0, seed=f"{job.shot_id}:{job.prompt}"))
             duration = job.duration
         return ProviderResult(
             job_id=job.id,
@@ -78,3 +79,29 @@ def _mock_png(width: int, height: int, *, seed: str) -> bytes:
 def _png_chunk(kind: bytes, payload: bytes) -> bytes:
     checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
     return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", checksum)
+
+
+def _mock_wav(*, duration: float, seed: str) -> bytes:
+    sample_rate = 16000
+    channels = 1
+    bits = 16
+    frames = max(1, round(duration * sample_rate))
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    frequency = 220 + digest[0]
+    samples = bytearray()
+    for index in range(frames):
+        envelope = min(1.0, index / max(1, sample_rate // 20), (frames - index) / max(1, sample_rate // 20))
+        value = int(1800 * envelope * math.sin(2 * math.pi * frequency * index / sample_rate))
+        samples.extend(struct.pack("<h", value))
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data = bytes(samples)
+    return (
+        b"RIFF"
+        + struct.pack("<I", 36 + len(data))
+        + b"WAVEfmt "
+        + struct.pack("<IHHIIHH", 16, 1, channels, sample_rate, byte_rate, block_align, bits)
+        + b"data"
+        + struct.pack("<I", len(data))
+        + data
+    )

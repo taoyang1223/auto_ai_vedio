@@ -13,6 +13,8 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video generate demo_project --dry-run
 .venv/bin/python -m auto_video jobs plan demo_project --provider mock --kind video
 .venv/bin/python -m auto_video jobs submit demo_project --provider mock --kind video
+.venv/bin/python -m auto_video audio demo_project --dry-run
+.venv/bin/python -m auto_video jobs submit demo_project --provider mock --kind audio
 .venv/bin/python -m auto_video jobs status demo_project
 .venv/bin/python -m auto_video worker export demo_project --provider mock --kind video --out /tmp/av-bundle --force
 .venv/bin/python -m auto_video worker run /tmp/av-bundle
@@ -38,6 +40,7 @@ python3 -m venv .venv
 The `autodl_comfyui_wan` template creates a three-shot image-to-video project with:
 
 - `comfyui_wan` external-command provider config.
+- `local_tts` 中文配音 provider config, using subtitles as narration text.
 - A `wan2_2_smoothmix_i2v` ComfyUI workflow registry entry with node mappings.
 - An `autodl_5090` remote profile ready for host, port, and workflow path edits.
 - Placeholder first-frame PNGs under `assets/refs/`.
@@ -48,6 +51,7 @@ Before running it on a rented GPU, replace the placeholder PNGs with real first-
 ```bash
 .venv/bin/python -m auto_video validate wan_story
 .venv/bin/python -m auto_video remote run wan_story --profile autodl_5090 --provider comfyui_wan --kind video
+.venv/bin/python -m auto_video audio wan_story --provider local_tts --skip-succeeded
 .venv/bin/python -m auto_video probe wan_story --strict
 .venv/bin/python -m auto_video continuity extract-tail-frames wan_story
 .venv/bin/python -m auto_video assemble wan_story

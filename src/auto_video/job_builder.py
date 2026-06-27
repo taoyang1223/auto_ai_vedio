@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from .jobs import (
     GenerationJob,
     ProviderControls,
@@ -106,6 +109,17 @@ def build_jobs(
         now = utc_now_iso()
         output_path = relative_output_path(shot.id, kind)
         output = resolve_project_path(project.config.root, output_path)
+        refs = _provider_refs(project, shot)
+        controls = _controls(project, shot)
+        metadata = _job_metadata(
+            kind=kind,
+            provider=provider,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            duration=shot.duration if kind in {"video", "audio"} else None,
+            refs=refs,
+            controls=controls,
+        )
         jobs.append(
             GenerationJob(
                 id=make_job_id(project.config.name, shot.id, kind, provider),
@@ -119,13 +133,45 @@ def build_jobs(
                 output_path=output_path,
                 output_exists=output.exists(),
                 output_updated_at=_mtime(output),
-                refs=_provider_refs(project, shot),
-                controls=_controls(project, shot),
+                refs=refs,
+                controls=controls,
                 created_at=now,
                 updated_at=now,
+                metadata=metadata,
             )
         )
     return jobs
+
+
+def _job_metadata(
+    *,
+    kind: str,
+    provider: str,
+    prompt: str,
+    negative_prompt: str,
+    duration: float | None,
+    refs: tuple[ProviderReference, ...],
+    controls: ProviderControls,
+) -> dict[str, str]:
+    payload = {
+        "kind": kind,
+        "provider": provider,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "duration": duration,
+        "controls": controls.to_dict(),
+        "refs": [
+            {
+                "path": ref.path,
+                "type": ref.type,
+                "role": ref.role,
+                "usage": ref.usage,
+            }
+            for ref in refs
+        ],
+    }
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {"input_hash": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
 
 
 def _first_frame_prompt_map(project: Project) -> dict[str, dict[str, str]]:

@@ -33,6 +33,7 @@ import {
   LayoutDashboard,
   Loader2,
   LogOut,
+  Mic2,
   Play,
   Plus,
   RefreshCw,
@@ -65,13 +66,14 @@ import type {
   WorkflowSummary
 } from "./types";
 
-type TabKey = "script" | "assets" | "first_frames" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
+type TabKey = "script" | "assets" | "first_frames" | "shots" | "voice" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
   { key: "script", label: "脚本拆镜", icon: Sparkles },
   { key: "assets", label: "素材库", icon: ImagePlus },
   { key: "first_frames", label: "首帧设计", icon: ImagePlus },
   { key: "shots", label: "分镜编排", icon: Clapperboard },
+  { key: "voice", label: "配音", icon: Mic2 },
   { key: "prompt", label: "提示词", icon: Wand2 },
   { key: "review", label: "成片审看", icon: Eye },
   { key: "workflow", label: "工作流配置", icon: Boxes },
@@ -440,6 +442,7 @@ function ProjectConsole() {
       {tab === "assets" ? <AssetLibraryPanel /> : null}
       {tab === "first_frames" ? <FirstFramePanel /> : null}
       {tab === "shots" ? <ShotsPanel /> : null}
+      {tab === "voice" ? <VoicePanel /> : null}
       {tab === "prompt" ? <PromptProfilePanel /> : null}
       {tab === "review" ? <ReviewPanel /> : null}
       {tab === "workflow" ? <WorkflowPanel /> : null}
@@ -498,6 +501,12 @@ function FinalRenderPreview({ detail }: { detail: ProjectDetail }) {
               <a className="btn" href={mediaUrl(detail.name, finalRender.subtitle)} target="_blank" rel="noreferrer">
                 <Film size={17} />
                 字幕 {finalRender.subtitle_entries || ""}
+              </a>
+            ) : null}
+            {finalRender.voiceover ? (
+              <a className="btn" href={mediaUrl(detail.name, finalRender.voiceover)} target="_blank" rel="noreferrer">
+                <Mic2 size={17} />
+                旁白 {finalRender.voiceover_segments || ""}
               </a>
             ) : null}
             {finalRender.versions?.slice(-3).map((version, index) => (
@@ -591,7 +600,7 @@ function ProductionStatus({
 }) {
   const steps = productionSteps(detail, tasks);
   return (
-    <section className="grid grid-cols-7 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
+    <section className="grid grid-cols-8 gap-3 max-2xl:grid-cols-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
       {steps.map((step) => {
         const Icon = step.icon;
         return (
@@ -624,6 +633,8 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
   const staticRefs = detail.shots_detail.reduce((count, shot) => count + shot.refs.length, 0);
   const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
+  const generatedVoice = detail.shots_detail.filter((shot) => Boolean(generatedAudioRef(shot))).length;
+  const staleVoice = detail.shots_detail.filter((shot) => shot.voice_freshness?.status === "stale").length;
   const profileFilled = Object.values(detail.prompt_profile || {}).filter((value) => String(value || "").trim()).length;
   const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
   const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
@@ -661,6 +672,14 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       status: profileFilled >= 5 ? "done" : profileFilled > 0 ? "warn" : "pending",
       tab: "prompt",
       icon: Wand2
+    },
+    {
+      key: "voice",
+      label: "分镜配音",
+      metric: staleVoice ? `${staleVoice} 条需更新` : generatedVoice ? `${generatedVoice}/${totalShots} 已生成` : "未生成",
+      status: staleVoice ? "warn" : totalShots > 0 && generatedVoice === totalShots ? "done" : generatedVoice > 0 ? "warn" : "pending",
+      tab: "voice",
+      icon: Mic2
     },
     {
       key: "workflow",
@@ -1624,6 +1643,167 @@ function ShotsPanel() {
   );
 }
 
+function VoicePanel() {
+  const { detail, enqueueTask, persistShots, setMessage, setShots } = useAppStore();
+  const [busy, setBusy] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  if (!detail) return null;
+  const project = detail;
+
+  const generated = project.shots_detail.filter((shot) => Boolean(generatedAudioRef(shot))).length;
+  const stale = project.shots_detail.filter((shot) => shot.voice_freshness?.status === "stale").length;
+  const provider = project.config.default_audio_provider || "local_tts";
+
+  function updateShot(index: number, patch: Partial<Shot>) {
+    const next = project.shots_detail.map((shot, itemIndex) => (itemIndex === index ? { ...shot, ...patch } : shot));
+    setShots(next);
+  }
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await persistShots();
+    } catch (failure) {
+      setError(friendlyError(failure));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function enqueue(action: string, label: string, payload: Record<string, unknown>) {
+    setBusy(label);
+    setError("");
+    try {
+      await enqueueTask(project.name, action, payload, label);
+      setMessage(`${label}已加入队列`);
+    } catch (failure) {
+      setError(friendlyError(failure));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid gap-4">
+      <div className="panel p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Mic2 size={18} className="text-teal-700" />
+              配音工作台
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {provider} · {generated}/{project.shots_detail.length} 已生成{stale ? ` · ${stale} 条需更新` : ""}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn"
+              disabled={Boolean(busy)}
+              onClick={() => enqueue("jobs-plan", "配音计划", { provider, kind: "audio", skip_succeeded: true })}
+              type="button"
+            >
+              {busy === "配音计划" ? <Loader2 className="animate-spin" size={17} /> : <Clapperboard size={17} />}
+              配音计划
+            </button>
+            <button
+              className="btn btn-primary"
+              disabled={Boolean(busy)}
+              onClick={() => enqueue("generate", "生成/更新配音", { provider, kind: "audio", skip_succeeded: true })}
+              type="button"
+            >
+              {busy === "生成/更新配音" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
+              生成/更新配音
+            </button>
+            <button className="btn" disabled={saving} onClick={save} type="button">
+              {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+              保存台词
+            </button>
+            <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("assemble", "合成带配音成片", {})} type="button">
+              {busy === "合成带配音成片" ? <Loader2 className="animate-spin" size={17} /> : <Film size={17} />}
+              合成成片
+            </button>
+          </div>
+        </div>
+        {error ? <div className="mt-3 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      </div>
+
+      <div className="grid grid-cols-3 gap-4 max-2xl:grid-cols-2 max-lg:grid-cols-1">
+        {project.shots_detail.map((shot, index) => (
+          <VoiceShotCard
+            key={shot.id}
+            index={index}
+            projectName={project.name}
+            provider={provider}
+            shot={shot}
+            updateShot={updateShot}
+            onGenerate={(shotId) => enqueue("generate", `${shotId} 重配`, { provider, kind: "audio", only: [shotId] })}
+            busy={busy}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function VoiceShotCard({
+  busy,
+  index,
+  onGenerate,
+  projectName,
+  provider,
+  shot,
+  updateShot
+}: {
+  busy: string;
+  index: number;
+  onGenerate: (shotId: string) => void;
+  projectName: string;
+  provider: string;
+  shot: Shot;
+  updateShot: (index: number, patch: Partial<Shot>) => void;
+}) {
+  const audio = generatedAudioRef(shot);
+  const status = voiceGenerationStatus(shot);
+  return (
+    <article className="panel overflow-hidden">
+      <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-100 px-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-bold text-teal-700">{shot.id}</span>
+            <span className="truncate text-sm font-semibold text-slate-900">{shot.title}</span>
+          </div>
+          <div className="mt-0.5 truncate text-xs text-slate-500">{shot.voice_freshness?.message || voiceGenerationLabel(status)}</div>
+        </div>
+        <VoiceStatusPill status={status} />
+      </div>
+      <div className="grid gap-3 p-4">
+        {audio ? (
+          <audio className="w-full" src={mediaUrl(projectName, audio)} controls />
+        ) : (
+          <div className="grid h-12 place-items-center rounded-lg border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
+            尚未生成音频
+          </div>
+        )}
+        <LabeledTextarea label="配音台词" rows={4} value={shot.subtitle} onChange={(value) => updateShot(index, { subtitle: value })} />
+        <LabeledInput label="声音意图" value={shot.audio_intent || ""} onChange={(value) => updateShot(index, { audio_intent: value })} />
+        <div className="grid grid-cols-[1fr_auto] items-end gap-3">
+          <label className="grid gap-1">
+            <span className="label">配音服务</span>
+            <input className="control w-full bg-slate-50 text-slate-500" value={provider} readOnly />
+          </label>
+          <button className="btn h-10" disabled={Boolean(busy)} onClick={() => onGenerate(shot.id)} type="button">
+            {busy === `${shot.id} 重配` ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
+            重配
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 const promptProfileFields: Array<{ key: keyof PromptProfile; label: string; rows?: number; compact?: boolean }> = [
   { key: "subject", label: "主体", compact: true },
   { key: "character", label: "角色一致性" },
@@ -2014,6 +2194,21 @@ function ReviewPanel() {
               {busy === "probe" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
               自动验片
             </button>
+            <button
+              className="btn"
+              disabled={Boolean(busy)}
+              onClick={() =>
+                enqueue("generate", "生成配音", {
+                  provider: detail.config.default_audio_provider,
+                  kind: "audio",
+                  skip_succeeded: true
+                })
+              }
+              type="button"
+            >
+              {busy === "generate" ? <Loader2 className="animate-spin" size={17} /> : <Mic2 size={17} />}
+              生成配音
+            </button>
             <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("continuity", "提取连续性", { force: true })} type="button">
               {busy === "continuity" ? <Loader2 className="animate-spin" size={17} /> : <Copy size={17} />}
               提取连续性
@@ -2064,6 +2259,7 @@ function ReviewShotCard({
   const [error, setError] = useState("");
   const firstFrame = firstFrameRef(shot);
   const generatedClip = generatedClipRef(shot);
+  const generatedAudio = generatedAudioRef(shot);
   const generationStatus = shotGenerationStatus(shot);
 
   async function rerunShot() {
@@ -2123,6 +2319,7 @@ function ReviewShotCard({
             )}
           </div>
         )}
+        {generatedAudio ? <audio className="w-full" src={mediaUrl(projectName, generatedAudio)} controls /> : null}
         <div className="line-clamp-3 text-sm leading-6 text-slate-600">{shot.visual_prompt}</div>
         {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
       </div>
@@ -2465,6 +2662,8 @@ function RunPanel() {
     },
     { key: "jobs-plan", label: "生成计划", icon: Clapperboard, payload: { provider: project.config.default_video_provider, kind: "video" } },
     { key: "generate", label: "提交生成", icon: Play, payload: { provider: project.config.default_video_provider, kind: "video" } },
+    { key: "voice-plan", label: "配音计划", icon: Mic2, action: "jobs-plan", payload: { provider: project.config.default_audio_provider, kind: "audio", skip_succeeded: true } },
+    { key: "voice-generate", label: "生成配音", icon: Mic2, action: "generate", payload: { provider: project.config.default_audio_provider, kind: "audio", skip_succeeded: true } },
     {
       key: "remote-plan",
       label: "远程预案",
@@ -2510,7 +2709,8 @@ function RunPanel() {
     setBusy(action.key);
     setError("");
     try {
-      const task = await enqueueTask(project.name, action.key, action.payload, action.label);
+      const taskAction = "action" in action && action.action ? action.action : action.key;
+      const task = await enqueueTask(project.name, taskAction, action.payload, action.label);
       setSelectedTaskId(task.id);
       setMessage(`${action.label}已加入队列`);
     } catch (error) {
@@ -2864,6 +3064,11 @@ function generatedClipRef(shot: Shot) {
   return typeof clip === "string" ? clip : "";
 }
 
+function generatedAudioRef(shot: Shot) {
+  const audio = shot.manifest?.audio;
+  return typeof audio === "string" ? audio : "";
+}
+
 function shotGenerationStatus(shot: Shot) {
   return shot.freshness?.status || (generatedClipRef(shot) ? "generated" : "pending");
 }
@@ -2884,6 +3089,27 @@ function ShotGenerationPill({ status }: { status: ReturnType<typeof shotGenerati
       {stale ? "需重跑" : "已生成"}
     </span>
   );
+}
+
+function voiceGenerationStatus(shot: Shot) {
+  return shot.voice_freshness?.status || (generatedAudioRef(shot) ? "generated" : "pending");
+}
+
+function voiceGenerationLabel(status: ReturnType<typeof voiceGenerationStatus>) {
+  return {
+    generated: "配音已同步",
+    stale: "台词变化，需重配",
+    pending: "未生成配音"
+  }[status];
+}
+
+function VoiceStatusPill({ status }: { status: ReturnType<typeof voiceGenerationStatus> }) {
+  const className = {
+    generated: "border-teal-200 bg-teal-50 text-teal-700",
+    stale: "border-amber-200 bg-amber-50 text-amber-700",
+    pending: "border-slate-200 bg-slate-50 text-slate-500"
+  }[status];
+  return <span className={`shrink-0 rounded-md border px-2 py-0.5 text-xs ${className}`}>{voiceGenerationLabel(status)}</span>;
 }
 
 function mediaUrl(projectName: string, path: string) {

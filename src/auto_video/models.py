@@ -26,7 +26,7 @@ REFERENCE_USAGES = {
     "extract_audio_rhythm",
     "provide_context",
 }
-BUILTIN_PROVIDERS = {"mock", "seedream", "seedance", "wan", "slideshow"}
+BUILTIN_PROVIDERS = {"mock", "seedream", "seedance", "wan", "slideshow", "local_tts"}
 
 
 def _require_enum(value: str, allowed: set[str], field_name: str) -> None:

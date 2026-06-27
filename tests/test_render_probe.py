@@ -108,6 +108,26 @@ def test_assemble_project_archives_previous_final_render(demo_project_files):
     assert previous.read_bytes() == b"final-video"
 
 
+def test_assemble_project_muxes_generated_voiceover(demo_project_files):
+    project = load_project(demo_project_files)
+    generate_videos(project, provider_name="mock", dry_run=False)
+    from auto_video.pipeline import submit_jobs
+
+    submit_jobs(load_project(demo_project_files), kind="audio", provider_name="mock")
+    project = load_project(demo_project_files)
+    runner = FakeRenderRunner()
+
+    result = assemble_project(project, runner=runner)
+
+    project = load_project(demo_project_files)
+    assert result["voiceover"]["path"] == "renders/final_voice.wav"
+    assert result["voiceover"]["segments"][0]["source"] == "generated/audio/S01.wav"
+    assert len(runner.commands) == 4
+    assert runner.commands[-1][runner.commands[-1].index("-c:a") + 1] == "aac"
+    assert project.manifest["renders"]["final"]["voiceover"] == "renders/final_voice.wav"
+    assert project.manifest["renders"]["final"]["voiceover_segments"] == 1
+
+
 def test_assemble_project_dry_run_reports_input_checks(demo_project_files):
     project = load_project(demo_project_files)
     generate_videos(project, provider_name="mock", dry_run=False)

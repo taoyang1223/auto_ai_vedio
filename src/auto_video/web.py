@@ -469,12 +469,14 @@ def _project_detail(root: Path) -> dict[str, Any]:
     project = load_project(root)
     manifest_shots = project.manifest.get("shots", {})
     video_refresh_ids = _video_refresh_ids(project)
+    audio_refresh_ids = _audio_refresh_ids(project)
     shots = []
     for shot in project.shots:
         shot_payload = asdict(shot)
         shot_manifest = manifest_shots.get(shot.id, {})
         shot_payload["manifest"] = shot_manifest
         shot_payload["freshness"] = _shot_freshness(shot.id, shot_manifest, video_refresh_ids)
+        shot_payload["voice_freshness"] = _audio_freshness(shot.id, shot_manifest, audio_refresh_ids)
         shots.append(shot_payload)
     return {
         **_project_summary(root),
@@ -503,12 +505,28 @@ def _video_refresh_ids(project: Any) -> set[str]:
     return {str(job.get("shot_id")) for job in plan.get("planned", []) if isinstance(job, dict)}
 
 
+def _audio_refresh_ids(project: Any) -> set[str]:
+    try:
+        plan = plan_jobs(project, kind="audio", skip_succeeded=True)
+    except AutoVideoError:
+        return set()
+    return {str(job.get("shot_id")) for job in plan.get("planned", []) if isinstance(job, dict)}
+
+
 def _shot_freshness(shot_id: str, manifest: Any, video_refresh_ids: set[str]) -> dict[str, str]:
     if not isinstance(manifest, dict) or not manifest.get("clip"):
         return {"status": "pending", "message": "尚未生成视频"}
     if shot_id in video_refresh_ids:
         return {"status": "stale", "message": "首帧或引用比视频更新，建议重跑"}
     return {"status": "generated", "message": "视频与当前首帧同步"}
+
+
+def _audio_freshness(shot_id: str, manifest: Any, audio_refresh_ids: set[str]) -> dict[str, str]:
+    if not isinstance(manifest, dict) or not manifest.get("audio"):
+        return {"status": "pending", "message": "尚未生成配音"}
+    if shot_id in audio_refresh_ids:
+        return {"status": "stale", "message": "字幕或配音配置已变化，建议重生成配音"}
+    return {"status": "generated", "message": "配音与当前字幕同步"}
 
 
 def _remote_profiles_detail(project: Any) -> list[dict[str, Any]]:
@@ -692,12 +710,12 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
     remote_profile = str(payload.get("profile") or _first_remote_profile(project) or "")
     use_remote = bool(remote_profile) and not bool(payload.get("local_only", False))
 
-    logger("步骤 1/5：校验项目")
+    logger("步骤 1/6：校验项目")
     warnings = validate_project(project)
     steps.append({"step": "validate", "warning_count": len(warnings), "warnings": warnings})
 
     if not bool(payload.get("skip_first_frames", False)):
-        logger("步骤 2/5：生成或补齐首帧")
+        logger("步骤 2/6：生成或补齐首帧")
         if use_remote and project.config.default_image_provider != "mock":
             image_result = _run_remote_generation(
                 project,
@@ -719,7 +737,7 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
         steps.append({"step": "first_frames", "result": image_result})
 
     project = load_project(project_root)
-    logger("步骤 3/5：生成缺失或过期分镜视频")
+    logger("步骤 3/6：生成缺失或过期分镜视频")
     if use_remote and project.config.default_video_provider != "mock":
         video_result = _run_remote_generation(
             project,
@@ -741,7 +759,23 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
     steps.append({"step": "videos", "result": video_result})
 
     project = load_project(project_root)
-    logger("步骤 4/5：自动验片")
+    if not bool(payload.get("skip_voiceover", False)):
+        logger("步骤 4/6：生成缺失或过期配音")
+        audio_results = submit_jobs(
+            project,
+            kind="audio",
+            provider_name=payload.get("audio_provider") or project.config.default_audio_provider,
+            only=_payload_only(payload),
+            skip_succeeded=True,
+        )
+        audio_result = {"count": len(audio_results), "submitted": [_provider_result_summary(result, project.config.root) for result in audio_results]}
+        steps.append({"step": "voiceover", "result": audio_result})
+    else:
+        logger("步骤 4/6：跳过配音")
+        steps.append({"step": "voiceover", "skipped": True})
+
+    project = load_project(project_root)
+    logger("步骤 5/6：自动验片")
     probe = probe_project(
         project,
         dry_run=bool(payload.get("probe_dry_run", project.config.default_video_provider == "mock")),
@@ -751,11 +785,11 @@ def _run_full_production(project_root: Path, payload: dict[str, Any], logger: Ta
 
     project = load_project(project_root)
     if not bool(payload.get("skip_assemble", False)):
-        logger("步骤 5/5：合成成片")
+        logger("步骤 6/6：合成成片")
         render = assemble_project(project, dry_run=bool(payload.get("dry_run", project.config.default_video_provider == "mock")))
         steps.append({"step": "assemble", "result": render})
     else:
-        logger("步骤 5/5：跳过合成")
+        logger("步骤 6/6：跳过合成")
         steps.append({"step": "assemble", "skipped": True})
 
     if bool(payload.get("extract_continuity", True)):

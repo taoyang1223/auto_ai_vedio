@@ -23,7 +23,7 @@ def select_jobs(
     if failed_only:
         return [job for job in jobs if _job_status(job, manifest) in FAILED_JOB_STATUSES]
     if skip_succeeded:
-        return [job for job in jobs if _job_status(job, manifest) != "succeeded" or _job_needs_refresh(job)]
+        return [job for job in jobs if _job_status(job, manifest) != "succeeded" or _job_needs_refresh(job, manifest)]
     return jobs
 
 
@@ -54,7 +54,11 @@ def _shot_has_kind_output(kind: str, shot: dict[str, Any]) -> bool:
     return False
 
 
-def _job_needs_refresh(job: GenerationJob) -> bool:
+def _job_needs_refresh(job: GenerationJob, manifest: dict[str, Any]) -> bool:
+    previous_hash = _previous_input_hash(job, manifest)
+    current_hash = str(job.metadata.get("input_hash") or "")
+    if previous_hash and current_hash and previous_hash != current_hash:
+        return True
     if not job.output_exists:
         return True
     if job.output_updated_at is None:
@@ -63,3 +67,14 @@ def _job_needs_refresh(job: GenerationJob) -> bool:
         if ref.exists and ref.updated_at is not None and ref.updated_at > job.output_updated_at:
             return True
     return False
+
+
+def _previous_input_hash(job: GenerationJob, manifest: dict[str, Any]) -> str:
+    jobs = manifest.get("jobs", {}) if isinstance(manifest, dict) else {}
+    record = jobs.get(job.id) if isinstance(jobs, dict) else None
+    if not isinstance(record, dict):
+        return ""
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return ""
+    return str(metadata.get("input_hash") or "")

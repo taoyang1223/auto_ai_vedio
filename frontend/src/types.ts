@@ -76,6 +76,10 @@ export type Shot = {
     status: "generated" | "stale" | "pending";
     message?: string;
   };
+  voice_freshness?: {
+    status: "generated" | "stale" | "pending";
+    message?: string;
+  };
 };
 
 export type WorkflowSummary = {
@@ -152,6 +156,8 @@ export type RenderSummary = {
   path?: string;
   subtitle?: string;
   subtitle_entries?: number;
+  voiceover?: string;
+  voiceover_segments?: number;
   command?: string[];
   versions?: Array<{
     path: string;
