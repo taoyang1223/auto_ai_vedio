@@ -18,6 +18,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   Activity,
   AlertCircle,
+  BookOpen,
   Boxes,
   CheckCircle2,
   ChevronRight,
@@ -58,6 +59,7 @@ import type {
   FirstFramePrompt,
   ProjectDetail,
   PromptProfile,
+  NovelDraftResult,
   ScriptDraftResult,
   Shot,
   RemoteProfileSummary,
@@ -66,9 +68,10 @@ import type {
   WorkflowSummary
 } from "./types";
 
-type TabKey = "script" | "assets" | "first_frames" | "shots" | "voice" | "prompt" | "review" | "workflow" | "run" | "config";
+type TabKey = "novel" | "script" | "assets" | "first_frames" | "shots" | "voice" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
+  { key: "novel", label: "小说章节", icon: BookOpen },
   { key: "script", label: "脚本拆镜", icon: Sparkles },
   { key: "assets", label: "素材库", icon: ImagePlus },
   { key: "first_frames", label: "首帧设计", icon: ImagePlus },
@@ -356,7 +359,7 @@ function ProjectSidebar({ active, projects, workspace }: { active: string; proje
 function ProjectConsole() {
   const { deleteExistingProject, detail, setMessage, tasks } = useAppStore();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<TabKey>("shots");
+  const [tab, setTab] = useState<TabKey>("novel");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -438,6 +441,7 @@ function ProjectConsole() {
         })}
       </nav>
 
+      {tab === "novel" ? <NovelChapterPanel /> : null}
       {tab === "script" ? <ScriptStoryboardPanel /> : null}
       {tab === "assets" ? <AssetLibraryPanel /> : null}
       {tab === "first_frames" ? <FirstFramePanel /> : null}
@@ -883,6 +887,280 @@ function defaultScriptFromProject(detail: ProjectDetail) {
     .map((shot) => shot.subtitle || shot.intent || shot.visual_prompt)
     .filter(Boolean)
     .join("。");
+}
+
+function NovelChapterPanel() {
+  const { applyNovel, detail, draftNovel, enqueueTask, novel, setMessage } = useAppStore();
+  const [chapterText, setChapterText] = useState("");
+  const [chapterTitle, setChapterTitle] = useState("");
+  const [targetMinutes, setTargetMinutes] = useState("20");
+  const [shotSeconds, setShotSeconds] = useState("12");
+  const [provider, setProvider] = useState("");
+  const [draft, setDraft] = useState<NovelDraftResult | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    setChapterTitle(`第${(novel?.chapters.length || 0) + 1}章`);
+    setProvider(detail.config.default_video_provider);
+    setDraft(null);
+    setError("");
+  }, [detail?.name]);
+
+  if (!detail) return null;
+  const project = detail;
+  const activeNovel = draft?.novel || novel;
+  const characters = draft?.characters || activeNovel?.characters || [];
+  const scenes = draft?.scenes || activeNovel?.scenes || [];
+  const chapters = activeNovel?.chapters || [];
+  const previewShots = draft?.shots || project.shots_detail;
+  const duration = draft?.meta.duration || project.shots_detail.reduce((total, shot) => total + Number(shot.duration || 0), 0);
+
+  async function generateDraft() {
+    setBusy("draft");
+    setError("");
+    try {
+      const result = await draftNovel({
+        chapter_text: chapterText,
+        title: chapterTitle.trim() || undefined,
+        target_minutes: Number(targetMinutes),
+        shot_seconds: Number(shotSeconds),
+        provider: provider.trim() || project.config.default_video_provider
+      });
+      setDraft(result);
+      setMessage(`章节草稿已生成：${result.meta.shot_count} 个分镜`);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyDraft() {
+    if (!draft) return;
+    setBusy("apply");
+    setError("");
+    try {
+      await applyNovel(draft);
+      setMessage("小说章节已应用，人物、场景和音色档案已保存");
+      setChapterText("");
+      setDraft(null);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyDraftAndProduce() {
+    if (!draft) return;
+    setBusy("produce");
+    setError("");
+    try {
+      await applyNovel(draft);
+      await enqueueTask(
+        project.name,
+        "produce-all",
+        {
+          profile: project.remote_profiles_detail[0]?.name || undefined,
+          provider: project.config.default_video_provider,
+          kind: "video"
+        },
+        "小说章节完整生产"
+      );
+      setMessage("小说章节已应用，并加入完整生产队列");
+      setChapterText("");
+      setDraft(null);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid grid-cols-[minmax(360px,0.78fr)_minmax(0,1.22fr)] gap-4 max-2xl:grid-cols-1">
+      <article className="panel p-5">
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <BookOpen size={18} className="text-teal-700" />
+              小说章节
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {chapters.length} 章 · {characters.length} 个人物 · {scenes.length} 个场景
+            </div>
+          </div>
+          {draft ? (
+            <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+              草稿待应用
+            </span>
+          ) : null}
+        </div>
+
+        <div className="grid gap-3">
+          <LabeledTextarea label="本章正文" rows={18} value={chapterText} onChange={setChapterText} />
+          <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
+            <LabeledInput label="章节标题" value={chapterTitle} onChange={setChapterTitle} />
+            <LabeledInput label="视频服务" value={provider} onChange={setProvider} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <LabeledInput label="目标分钟" type="number" value={targetMinutes} onChange={setTargetMinutes} />
+            <LabeledInput label="单镜基准秒" type="number" value={shotSeconds} onChange={setShotSeconds} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-primary" disabled={busy === "draft" || !chapterText.trim()} onClick={generateDraft} type="button">
+              {busy === "draft" ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
+              生成章节草稿
+            </button>
+            <button className="btn" disabled={busy === "apply" || !draft} onClick={applyDraft} type="button">
+              {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+              应用为项目分镜
+            </button>
+            <button className="btn" disabled={busy === "produce" || !draft} onClick={applyDraftAndProduce} type="button">
+              {busy === "produce" ? <Loader2 className="animate-spin" size={17} /> : <Play size={17} />}
+              应用并开始生产
+            </button>
+          </div>
+          {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+        </div>
+      </article>
+
+      <aside className="grid gap-4">
+        <article className="panel p-5">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <Clapperboard size={18} className="text-teal-700" />
+                章节生产档案
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {previewShots.length} 个分镜 · {formatDuration(duration)} · {draft?.meta.provider || project.config.default_video_provider}
+              </div>
+            </div>
+            {draft ? (
+              <button className="btn btn-primary" disabled={busy === "apply"} onClick={applyDraft} type="button">
+                {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+                应用草稿
+              </button>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-4 gap-3 max-lg:grid-cols-2">
+            <MetricCard label="目标时长" value={draft ? `${draft.meta.target_minutes} 分钟` : formatDuration(duration)} />
+            <MetricCard label="分镜数量" value={String(previewShots.length)} />
+            <MetricCard label="人物档案" value={String(characters.length)} />
+            <MetricCard label="场景档案" value={String(scenes.length)} />
+          </div>
+        </article>
+
+        <div className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
+          <NovelArchiveCard title="人物与音色" emptyText="暂无人物档案">
+            {characters.slice(0, 12).map((character) => (
+              <div key={character.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold text-slate-950">{character.name}</div>
+                  <span className="rounded-md bg-teal-50 px-2 py-1 text-xs text-teal-700">{genderLabel(character.gender)}</span>
+                </div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">{character.visual_profile}</div>
+                <div className="mt-2 flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                  <Mic2 size={13} />
+                  <span className="truncate">{character.voice}</span>
+                </div>
+              </div>
+            ))}
+          </NovelArchiveCard>
+
+          <NovelArchiveCard title="场景风格" emptyText="暂无场景档案">
+            {scenes.slice(0, 12).map((scene) => (
+              <div key={scene.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                <div className="font-semibold text-slate-950">{scene.name}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">{scene.style_prompt}</div>
+                <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">{scene.lighting}</div>
+              </div>
+            ))}
+          </NovelArchiveCard>
+        </div>
+
+        <article className="panel p-5">
+          <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900">
+            <Film size={18} className="text-teal-700" />
+            分镜预览
+          </div>
+          {previewShots.length ? (
+            <div className="grid max-h-[760px] gap-3 overflow-auto pr-1">
+              {previewShots.slice(0, 40).map((shot) => (
+                <div key={shot.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="text-base font-bold text-teal-700">{shot.id}</span>
+                      <span className="truncate text-sm font-semibold text-slate-950">{shot.title}</span>
+                    </div>
+                    <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{shot.duration}s</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-600">
+                    <div>{shot.subtitle || shot.intent}</div>
+                    <div className="grid grid-cols-3 gap-2 text-xs max-lg:grid-cols-1">
+                      <span className="rounded-md bg-slate-50 px-2 py-1">人物：{shot.characters?.join(", ") || "旁白/场景"}</span>
+                      <span className="rounded-md bg-slate-50 px-2 py-1">说话：{shot.speaker || "旁白"}</span>
+                      <span className="rounded-md bg-slate-50 px-2 py-1">音色：{shot.voice || "默认"}</span>
+                    </div>
+                    <div className="rounded-md bg-slate-50 px-2 py-1 text-xs">场景：{shot.scene || "默认场景"}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="grid min-h-[220px] place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500">
+              暂无分镜
+            </div>
+          )}
+        </article>
+      </aside>
+    </section>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+      <div className="truncate text-xl font-semibold text-slate-950">{value}</div>
+      <div className="mt-1 text-xs text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function NovelArchiveCard({ children, emptyText, title }: { children: React.ReactNode; emptyText: string; title: string }) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <article className="panel p-5">
+      <div className="mb-4 text-sm font-semibold text-slate-900">{title}</div>
+      {hasChildren ? <div className="grid max-h-[420px] gap-3 overflow-auto pr-1">{children}</div> : (
+        <div className="grid min-h-[160px] place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500">
+          {emptyText}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function genderLabel(value: string) {
+  if (value === "female") return "女性";
+  if (value === "male") return "男性";
+  return "旁白/中性";
+}
+
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0 秒";
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return minutes ? `${minutes}分${rest.toString().padStart(2, "0")}秒` : `${rest} 秒`;
 }
 
 const assetTypeOptions = [

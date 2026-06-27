@@ -104,10 +104,11 @@ class LocalTTSProvider:
             )
         temp_media = _temp_media_path(project_root, job, ".mp3")
         temp_media.parent.mkdir(parents=True, exist_ok=True)
+        voice = _voice(job, self.config, default="zh-CN-XiaoxiaoNeural")
         command = (
             command_name,
             "--voice",
-            str(self.config.options.get("voice") or "zh-CN-XiaoxiaoNeural"),
+            voice,
             "--text",
             text,
             "--write-media",
@@ -121,7 +122,8 @@ class LocalTTSProvider:
         metadata = {
             "local_tts": {
                 "engine": "edge_tts",
-                "voice": str(self.config.options.get("voice") or "zh-CN-XiaoxiaoNeural"),
+                "voice": voice,
+                "speaker": str(job.metadata.get("speaker") or ""),
                 "text_source": _text_source(self.config),
                 "text_chars": len(text),
                 "synthesis": _completed_payload(command, completed),
@@ -154,10 +156,11 @@ class LocalTTSProvider:
             )
         temp_media = _temp_media_path(project_root, job, ".wav")
         temp_media.parent.mkdir(parents=True, exist_ok=True)
+        voice = _voice(job, self.config, default="zh")
         command = (
             command_name,
             "-v",
-            str(self.config.options.get("voice") or "zh"),
+            voice,
             "-w",
             temp_media.as_posix(),
             text,
@@ -166,7 +169,8 @@ class LocalTTSProvider:
         metadata = {
             "local_tts": {
                 "engine": engine,
-                "voice": str(self.config.options.get("voice") or "zh"),
+                "voice": voice,
+                "speaker": str(job.metadata.get("speaker") or ""),
                 "text_source": _text_source(self.config),
                 "text_chars": len(text),
                 "synthesis": _completed_payload(command, completed),
@@ -236,6 +240,11 @@ def _voice_text(job: GenerationJob, config: ProviderConfig) -> str:
     if source == "subtitle_or_prompt":
         return ((controls.subtitle if controls else "") or job.prompt).strip()
     return (controls.subtitle if controls else "").strip()
+
+
+def _voice(job: GenerationJob, config: ProviderConfig, *, default: str) -> str:
+    controls_voice = job.controls.voice if job.controls else ""
+    return str(job.metadata.get("voice") or controls_voice or config.options.get("voice") or default)
 
 
 def _text_source(config: ProviderConfig) -> str:

@@ -86,6 +86,10 @@ def _controls(project: Project, shot: ShotPlan) -> ProviderControls:
         width=project.config.width,
         height=project.config.height,
         fps=project.config.fps,
+        characters=shot.characters,
+        scene=shot.scene,
+        speaker=shot.speaker,
+        voice=shot.voice,
     )
 
 
@@ -119,6 +123,10 @@ def build_jobs(
             duration=shot.duration if kind in {"video", "audio"} else None,
             refs=refs,
             controls=controls,
+            speaker=shot.speaker,
+            voice=shot.voice,
+            scene=shot.scene,
+            characters=shot.characters,
         )
         jobs.append(
             GenerationJob(
@@ -152,6 +160,10 @@ def _job_metadata(
     duration: float | None,
     refs: tuple[ProviderReference, ...],
     controls: ProviderControls,
+    speaker: str = "",
+    voice: str = "",
+    scene: str = "",
+    characters: tuple[str, ...] = (),
 ) -> dict[str, str]:
     payload = {
         "kind": kind,
@@ -160,6 +172,10 @@ def _job_metadata(
         "negative_prompt": negative_prompt,
         "duration": duration,
         "controls": controls.to_dict(),
+        "speaker": speaker,
+        "voice": voice,
+        "scene": scene,
+        "characters": list(characters),
         "refs": [
             {
                 "path": ref.path,
@@ -171,7 +187,17 @@ def _job_metadata(
         ],
     }
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return {"input_hash": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
+    metadata = {"input_hash": hashlib.sha256(raw.encode("utf-8")).hexdigest()}
+    for key, value in {
+        "speaker": speaker,
+        "voice": voice,
+        "scene": scene,
+    }.items():
+        if value:
+            metadata[key] = value
+    if characters:
+        metadata["characters"] = ",".join(characters)
+    return metadata
 
 
 def _first_frame_prompt_map(project: Project) -> dict[str, dict[str, str]]:

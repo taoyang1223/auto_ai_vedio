@@ -141,6 +141,10 @@ class ShotPlan:
     title: str = ""
     intent: str = ""
     provider: str | None = None
+    characters: tuple[str, ...] = ()
+    scene: str = ""
+    speaker: str = ""
+    voice: str = ""
     camera_motion: str = ""
     environment_motion: str = ""
     performance: str = ""

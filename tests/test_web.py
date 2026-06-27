@@ -582,6 +582,51 @@ def test_web_api_drafts_and_applies_script_storyboard(tmp_path):
     assert manifest["renders"] == {}
 
 
+def test_web_api_drafts_and_applies_novel_chapter(tmp_path):
+    chapter_text = (
+        "夜雨落在青石客栈，林舟说：“今晚不能再等。”"
+        "苏眠问：“你确定那个人会来？”"
+        "两人来到后院石井旁，远处的马蹄声从巷口逼近。"
+    )
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "novel_story", "template": "autodl_comfyui_wan"},
+        )
+        drafted = request_json(
+            base_url,
+            "/api/projects/novel_story/novel-draft",
+            method="POST",
+            payload={
+                "chapter_text": chapter_text,
+                "title": "雨夜客栈",
+                "target_minutes": 1,
+                "shot_seconds": 6,
+                "provider": "mock",
+            },
+        )
+        applied = request_json(
+            base_url,
+            "/api/projects/novel_story/novel-apply",
+            method="POST",
+            payload={"draft": drafted},
+        )
+
+    project = load_project(tmp_path / "novel_story")
+    novel = json.loads((tmp_path / "novel_story" / "novel.json").read_text(encoding="utf-8"))
+
+    assert drafted["meta"]["shot_count"] == 10
+    assert {item["name"] for item in drafted["characters"]} >= {"旁白", "林舟", "苏眠"}
+    assert applied["applied"] == 10
+    assert applied["project"]["shots_detail"][0]["voice"]
+    assert applied["project"]["shots_detail"][0]["speaker"]
+    assert applied["project"]["shots_detail"][0]["scene"]
+    assert project.shots[0].voice == applied["project"]["shots_detail"][0]["voice"]
+    assert novel["chapters"][0]["title"] == "雨夜客栈"
+
+
 def test_web_api_manages_asset_library_and_shot_refs(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

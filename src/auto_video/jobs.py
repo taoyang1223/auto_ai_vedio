@@ -85,11 +85,19 @@ class ProviderControls:
     width: int
     height: int
     fps: int
+    characters: tuple[str, ...] = ()
+    scene: str = ""
+    speaker: str = ""
+    voice: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProviderControls":
         return cls(
             visual_prompt=str(data.get("visual_prompt", "")),
+            characters=tuple(str(item) for item in data.get("characters", []) if str(item).strip()),
+            scene=str(data.get("scene", "")),
+            speaker=str(data.get("speaker", "")),
+            voice=str(data.get("voice", "")),
             camera_motion=str(data.get("camera_motion", "")),
             environment_motion=str(data.get("environment_motion", "")),
             performance=str(data.get("performance", "")),

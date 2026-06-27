@@ -24,6 +24,7 @@ from .comfyui_runtime_doctor import run as run_comfyui_doctor
 from .first_frame_generation import generate_first_frames, promote_generated_images_to_first_frames
 from .first_frame_prompt import draft_first_frame_prompts, save_first_frame_prompts
 from .models import AssetRef, PromptProfile
+from .novel import apply_novel_chapter, draft_novel_chapter, load_novel_store
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
@@ -289,6 +290,17 @@ def _handler_factory(workspace: Path, *, token: str | None):
             if method == "POST" and tail == ["script-apply"]:
                 result = _apply_script_storyboard(project_root, self._read_json())
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
+                return
+            if method == "GET" and tail == ["novel"]:
+                self._send_json({"ok": True, "novel": load_novel_store(project_root)})
+                return
+            if method == "POST" and tail == ["novel-draft"]:
+                result = draft_novel_chapter(load_project(project_root), self._read_json())
+                self._send_json({"ok": True, **result})
+                return
+            if method == "POST" and tail == ["novel-apply"]:
+                result = apply_novel_chapter(project_root, self._read_json())
+                self._send_json({"ok": True, **result, "project": _project_detail(project_root), "novel": load_novel_store(project_root)})
                 return
             if method == "POST" and tail == ["first-frame"]:
                 result = _upload_first_frame(project_root, self._read_json())

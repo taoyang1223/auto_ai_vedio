@@ -45,6 +45,9 @@ def _profile_lines(profile: PromptProfile | None) -> list[str]:
 def _base_lines(shot: ShotPlan, profile: PromptProfile | None = None) -> list[str]:
     return [
         *_profile_lines(profile),
+        f"Characters in shot: {', '.join(shot.characters)}",
+        f"Scene continuity key: {shot.scene}",
+        f"Speaker: {shot.speaker}",
         f"Visual intent: {shot.visual_prompt}",
         f"Performance: {shot.performance}",
         f"Camera: {shot.camera_motion}",
@@ -73,6 +76,8 @@ def plan_prompt(shot: ShotPlan, *, provider: str, profile: PromptProfile | None 
     if provider == "wan":
         parts = [
             *_profile_lines(profile),
+            f"Characters: {', '.join(shot.characters)}",
+            f"Scene: {shot.scene}",
             shot.visual_prompt,
             f"Performance: {shot.performance}",
             f"Camera: {shot.camera_motion}",

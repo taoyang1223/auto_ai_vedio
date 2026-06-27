@@ -160,12 +160,19 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
 
 def _shot_plan(raw: dict[str, Any]) -> ShotPlan:
     refs = tuple(AssetRef(**ref) for ref in raw.get("refs", []))
+    characters = raw.get("characters") or ()
+    if isinstance(characters, str):
+        characters = [characters]
     return ShotPlan(
         id=str(raw["id"]),
         title=str(raw.get("title", "")),
         duration=float(raw["duration"]),
         intent=str(raw.get("intent", "")),
         provider=raw.get("provider"),
+        characters=tuple(str(item).strip() for item in characters if str(item).strip()),
+        scene=str(raw.get("scene", "")),
+        speaker=str(raw.get("speaker", "")),
+        voice=str(raw.get("voice", "")),
         visual_prompt=str(raw.get("visual_prompt", "")),
         camera_motion=str(raw.get("camera_motion", "")),
         environment_motion=str(raw.get("environment_motion", "")),

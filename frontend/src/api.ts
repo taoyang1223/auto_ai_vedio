@@ -6,6 +6,9 @@ import type {
   AssetUploadPayload,
   ComfyCheck,
   FirstFramePrompt,
+  NovelDraftPayload,
+  NovelDraftResult,
+  NovelStore,
   PromptProfile,
   ProjectDetail,
   ProjectSummary,
@@ -154,6 +157,34 @@ export async function applyScriptStoryboard(name: string, shots: Shot[]): Promis
     { shots }
   );
   return data.project;
+}
+
+export async function fetchNovelStore(name: string): Promise<NovelStore> {
+  const { data } = await client.get<ApiEnvelope<{ novel: NovelStore }>>(`/api/projects/${encodeURIComponent(name)}/novel`);
+  return data.novel;
+}
+
+export async function draftNovelChapter(name: string, payload: NovelDraftPayload): Promise<NovelDraftResult> {
+  const { data } = await client.post<ApiEnvelope<NovelDraftResult>>(
+    `/api/projects/${encodeURIComponent(name)}/novel-draft`,
+    payload
+  );
+  return {
+    chapter: data.chapter,
+    characters: data.characters,
+    scenes: data.scenes,
+    shots: data.shots,
+    novel: data.novel,
+    meta: data.meta
+  };
+}
+
+export async function applyNovelChapter(name: string, draft: NovelDraftResult): Promise<{ project: ProjectDetail; novel: NovelStore }> {
+  const { data } = await client.post<ApiEnvelope<{ project: ProjectDetail; novel: NovelStore }>>(
+    `/api/projects/${encodeURIComponent(name)}/novel-apply`,
+    { draft }
+  );
+  return { project: data.project, novel: data.novel };
 }
 
 export async function uploadFirstFrame(name: string, shotId: string, file: File): Promise<ProjectDetail> {

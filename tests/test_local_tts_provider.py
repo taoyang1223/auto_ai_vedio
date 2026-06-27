@@ -1,4 +1,5 @@
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 from auto_video.job_builder import build_jobs
@@ -58,3 +59,23 @@ def test_local_tts_edge_command_uses_subtitle_text(demo_project_files, monkeypat
     assert runner.commands[0][runner.commands[0].index("--text") + 1] == "Late night again"
     assert runner.commands[1][0] == "ffmpeg"
     assert result.metadata["local_tts"]["voice"] == "zh-CN-XiaoxiaoNeural"
+
+
+def test_local_tts_edge_command_prefers_shot_voice(demo_project_files, monkeypatch):
+    monkeypatch.setattr("auto_video.providers.local_tts.shutil.which", lambda _command: "/usr/local/bin/edge-tts")
+    project = load_project(demo_project_files)
+    job = build_jobs(project, kind="audio", provider_name="local_tts")[0]
+    job = replace(job, metadata={**job.metadata, "speaker": "char_lin", "voice": "zh-CN-YunjianNeural"})
+    runner = FakeTTSRunner()
+    provider = LocalTTSProvider(
+        "local_tts",
+        ProviderConfig(mode="local_tts", timeout_seconds=30, options={"engine": "edge_tts", "voice": "zh-CN-XiaoxiaoNeural"}),
+        runner,
+    )
+
+    result = provider.execute_job(job, project.config.root)
+
+    assert result.status == "succeeded"
+    assert runner.commands[0][runner.commands[0].index("--voice") + 1] == "zh-CN-YunjianNeural"
+    assert result.metadata["local_tts"]["speaker"] == "char_lin"
+    assert result.metadata["local_tts"]["voice"] == "zh-CN-YunjianNeural"

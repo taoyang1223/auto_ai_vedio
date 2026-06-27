@@ -1,15 +1,18 @@
 import { create } from "zustand";
 import {
   applyScriptStoryboard,
+  applyNovelChapter,
   cancelTask,
   createProject,
   deleteAsset,
   deleteProject,
   draftScriptStoryboard,
+  draftNovelChapter,
   enqueueProjectTask,
   fetchAuthStatus,
   fetchConfig,
   fetchFirstFramePrompts,
+  fetchNovelStore,
   fetchProject,
   fetchProjects,
   fetchProjectTasks,
@@ -32,6 +35,9 @@ import type {
   AssetRef,
   AssetLibraryItem,
   FirstFramePrompt,
+  NovelDraftPayload,
+  NovelDraftResult,
+  NovelStore,
   PromptProfile,
   RemoteProfilePayload,
   ScriptDraftPayload,
@@ -52,6 +58,7 @@ type AppState = {
   loading: boolean;
   message: string;
   tasks: WebTask[];
+  novel: NovelStore | null;
   authEnabled: boolean;
   authenticated: boolean;
   boot: () => Promise<void>;
@@ -66,6 +73,9 @@ type AppState = {
   savePromptProfile: (payload: PromptProfile) => Promise<ProjectDetail>;
   draftScriptShots: (payload: ScriptDraftPayload) => Promise<ScriptDraftResult>;
   applyScriptShots: (shots: Shot[]) => Promise<ProjectDetail>;
+  loadNovel: () => Promise<NovelStore>;
+  draftNovel: (payload: NovelDraftPayload) => Promise<NovelDraftResult>;
+  applyNovel: (draft: NovelDraftResult) => Promise<NovelStore>;
   saveAssetRefs: (shotId: string, refs: AssetRef[]) => Promise<AssetLibraryItem[]>;
   removeAsset: (assetId: string) => Promise<AssetLibraryItem[]>;
   loadFirstFramePrompts: () => Promise<FirstFramePrompt[]>;
@@ -91,6 +101,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   loading: false,
   message: "",
   tasks: [],
+  novel: null,
   authEnabled: false,
   authenticated: true,
 
@@ -137,6 +148,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       authenticated: false,
       configText: "",
       detail: null,
+      novel: null,
       projects: [],
       tasks: [],
       templates: [],
@@ -152,8 +164,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectProject: async (name: string) => {
     set({ loading: true });
     try {
-      const [detail, configText, tasks] = await Promise.all([fetchProject(name), fetchConfig(name), fetchProjectTasks(name)]);
-      set({ activeProject: name, detail, configText, tasks, loading: false, message: "" });
+      const [detail, configText, tasks, novel] = await Promise.all([fetchProject(name), fetchConfig(name), fetchProjectTasks(name), fetchNovelStore(name)]);
+      set({ activeProject: name, detail, configText, tasks, novel, loading: false, message: "" });
     } catch (error) {
       set({ loading: false });
       throw error;
@@ -183,6 +195,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeProject: next,
         configText: "",
         detail: null,
+        novel: null,
         loading: false,
         projects: projectsPayload.projects,
         tasks: [],
@@ -244,6 +257,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ detail: saved, message: "脚本分镜已应用" });
     await get().refreshProjects();
     return saved;
+  },
+
+  loadNovel: async () => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const novel = await fetchNovelStore(activeProject);
+    set({ novel });
+    return novel;
+  },
+
+  draftNovel: async (payload: NovelDraftPayload) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    return draftNovelChapter(activeProject, payload);
+  },
+
+  applyNovel: async (draft: NovelDraftResult) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await applyNovelChapter(activeProject, draft);
+    set({ detail: saved.project, novel: saved.novel, message: "小说章节已应用" });
+    await get().refreshProjects();
+    return saved.novel;
   },
 
   saveAssetRefs: async (shotId: string, refs: AssetRef[]) => {

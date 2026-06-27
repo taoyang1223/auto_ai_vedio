@@ -62,6 +62,10 @@ export type Shot = {
   duration: number;
   intent?: string;
   provider?: string;
+  characters?: string[];
+  scene?: string;
+  speaker?: string;
+  voice?: string;
   visual_prompt: string;
   camera_motion: string;
   environment_motion: string;
@@ -147,6 +151,65 @@ export type ScriptDraftResult = {
   meta: {
     shot_count: number;
     duration: number;
+    provider: string;
+  };
+};
+
+export type NovelCharacter = {
+  id: string;
+  name: string;
+  gender: string;
+  visual_profile: string;
+  voice: string;
+  voice_profile: string;
+  aliases?: string[];
+};
+
+export type NovelScene = {
+  id: string;
+  name: string;
+  style_prompt: string;
+  lighting: string;
+  continuity: string;
+};
+
+export type NovelChapter = {
+  id: string;
+  title: string;
+  target_minutes: number;
+  duration: number;
+  shot_count: number;
+  source_chars: number;
+  created_at?: string;
+};
+
+export type NovelStore = {
+  schema_version: string;
+  characters: NovelCharacter[];
+  scenes: NovelScene[];
+  chapters: NovelChapter[];
+};
+
+export type NovelDraftPayload = {
+  chapter_text: string;
+  title?: string;
+  chapter_id?: string;
+  target_minutes: number;
+  shot_seconds: number;
+  provider?: string;
+};
+
+export type NovelDraftResult = {
+  chapter: NovelChapter;
+  characters: NovelCharacter[];
+  scenes: NovelScene[];
+  shots: Shot[];
+  novel: NovelStore;
+  meta: {
+    target_minutes: number;
+    duration: number;
+    shot_count: number;
+    shot_seconds: number;
     provider: string;
   };
 };
