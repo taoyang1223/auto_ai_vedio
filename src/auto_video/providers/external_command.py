@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ class ExternalCommandProvider:
         payload = _job_payload(job, project_root, output_path)
         payload_path.parent.mkdir(parents=True, exist_ok=True)
         payload_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        provider_env = _env_from_config(self.config)
 
         command = (
             *self.command,
@@ -46,6 +48,7 @@ class ExternalCommandProvider:
                 text=True,
                 timeout=self.config.timeout_seconds,
                 check=False,
+                env={**os.environ, **provider_env} if provider_env else None,
             )
         except subprocess.TimeoutExpired as exc:
             return ProviderResult(
@@ -136,6 +139,21 @@ def _command_from_config(config: ProviderConfig) -> tuple[str, ...]:
             )
         command.append(token)
     return tuple(command)
+
+
+def _env_from_config(config: ProviderConfig) -> dict[str, str]:
+    raw = config.options.get("env")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError("external_command env must be a mapping", fix="Use environment variable names as keys.")
+    env: dict[str, str] = {}
+    for key, value in raw.items():
+        name = str(key).strip()
+        if not name or any(char in UNSAFE_COMMAND_CHARS or char == "=" for char in name):
+            raise ConfigError(f"external_command env has invalid name {key!r}", fix="Use clean NAME: value entries.")
+        env[name] = str(value)
+    return env
 
 
 def _payload_path(project_root: Path, job: GenerationJob) -> Path:

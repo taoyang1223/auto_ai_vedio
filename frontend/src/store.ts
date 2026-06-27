@@ -15,9 +15,10 @@ import {
   logout,
   saveConfig,
   saveShots,
+  updateWorkflowSettings,
   uploadFirstFrame
 } from "./api";
-import type { ProjectDetail, ProjectSummary, Shot, TemplateInfo, WebTask } from "./types";
+import type { ProjectDetail, ProjectSummary, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
 
 type AppState = {
   workspace: string;
@@ -40,6 +41,7 @@ type AppState = {
   setShots: (shots: Shot[]) => void;
   persistShots: () => Promise<void>;
   persistConfig: (text: string) => Promise<void>;
+  saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
   refreshProjects: () => Promise<void>;
   refreshTasks: (project?: string) => Promise<void>;
@@ -187,6 +189,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const saved = await saveConfig(activeProject, text);
     set({ detail: saved, configText: text, message: "配置已保存" });
     await get().refreshProjects();
+  },
+
+  saveWorkflowSettings: async (profile: string, payload: WorkflowSettingsPayload) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await updateWorkflowSettings(activeProject, profile, payload);
+    const configText = await fetchConfig(activeProject);
+    set({ detail: saved, configText, message: "工作流配置已保存" });
+    await get().refreshProjects();
+    return saved;
   },
 
   uploadFrame: async (shotId: string, file: File) => {

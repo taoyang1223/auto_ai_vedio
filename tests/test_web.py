@@ -234,6 +234,50 @@ def test_web_checks_comfyui_workflow(tmp_path):
     assert comfyui.records == ["/system_stats", "/queue"]
 
 
+def test_web_updates_comfyui_workflow_settings(tmp_path):
+    workflow = {
+        "218": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}},
+        "224": {"class_type": "LoadImage", "inputs": {"image": "input.png"}},
+        "228": {"class_type": "KSamplerAdvanced", "inputs": {"steps": 4, "cfg": 1.0}},
+        "229": {"class_type": "KSamplerAdvanced", "inputs": {"steps": 4, "cfg": 1.0}},
+        "230": {"class_type": "VHS_VideoCombine", "inputs": {"frame_rate": 16, "filename_prefix": "demo"}},
+        "231": {"class_type": "Seed", "inputs": {"seed": 42}},
+        "238": {"class_type": "INTConstant", "inputs": {"value": 2}},
+        "248": {"class_type": "INTConstant", "inputs": {"value": 832}},
+        "257": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "prompt"}},
+    }
+
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        payload = request_json(
+            base_url,
+            "/api/projects/wan_story/workflows/wan2_2_smoothmix_i2v",
+            method="PUT",
+            payload={
+                "base_url": "http://127.0.0.1:7000/",
+                "workflow_json": json.dumps(workflow),
+                "workflow_filename": "wan api.json",
+            },
+        )
+
+    project = load_project(tmp_path / "wan_story")
+    workflow_config = project.config.comfyui_workflows["wan2_2_smoothmix_i2v"]
+    provider_env = project.config.providers["comfyui_wan"].options["env"]
+    remote_env = project.config.remote_profiles["autodl_5090"]["remote_env"]
+
+    assert payload["project"]["workflows_detail"][0]["base_url"] == "http://127.0.0.1:7000"
+    assert workflow_config["workflow_path"] == "workflows/wan_api.json"
+    assert (tmp_path / "wan_story" / "workflows" / "wan_api.json").exists()
+    assert provider_env["COMFYUI_BASE_URL"] == "http://127.0.0.1:7000"
+    assert provider_env["COMFYUI_WORKFLOW"] == "workflows/wan_api.json"
+    assert remote_env["COMFYUI_WORKFLOW"] == "workflows/wan_api.json"
+
+
 def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

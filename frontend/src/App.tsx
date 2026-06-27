@@ -49,7 +49,7 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
-import type { ComfyCheck, ProjectDetail, Shot, WebTask, WebTaskStatus } from "./types";
+import type { ComfyCheck, ProjectDetail, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
 
 type TabKey = "shots" | "workflow" | "run" | "config";
 
@@ -765,44 +765,132 @@ function WorkflowPanel() {
 
   return (
     <section className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
-      {detail.workflows_detail.map((workflow) => {
-        const result = results[workflow.name];
-        const error = errors[workflow.name];
-        return (
-          <article key={workflow.name} className="panel p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
-                  <Boxes size={15} />
-                  {workflowKindLabel(workflow.kind)}
-                </div>
-                <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
-              </div>
-              <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
-            </div>
-            <dl className="mt-5 grid gap-3 text-sm">
-              <InfoRow label="配置档" value={workflow.name} />
-              <InfoRow label="服务地址" value={workflow.base_url || `读取变量 ${workflow.base_url_env}`} />
-              <InfoRow label="工作流文件" value={workflow.workflow_path || `读取变量 ${workflow.workflow_env}`} />
-              <InfoRow label="配置变量" value={`${workflow.base_url_env} / ${workflow.workflow_env} / ${workflow.profile_env}`} />
-            </dl>
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <button className="btn btn-primary" disabled={checking === workflow.name} onClick={() => check(workflow.name)} type="button">
-                {checking === workflow.name ? <Loader2 className="animate-spin" size={17} /> : <CheckCircle2 size={17} />}
-                检查连接
-              </button>
-              {workflow.tags.map((tag) => (
-                <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
-                  {tag}
-                </span>
-              ))}
-            </div>
-            {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
-            {result ? <ComfyCheckResult result={result} /> : null}
-          </article>
-        );
-      })}
+      {detail.workflows_detail.map((workflow) => (
+        <WorkflowCard
+          key={workflow.name}
+          checking={checking === workflow.name}
+          error={errors[workflow.name]}
+          onCheck={() => check(workflow.name)}
+          result={results[workflow.name]}
+          workflow={workflow}
+        />
+      ))}
     </section>
+  );
+}
+
+function WorkflowCard({
+  checking,
+  error,
+  onCheck,
+  result,
+  workflow
+}: {
+  checking: boolean;
+  error?: string;
+  onCheck: () => void;
+  result?: ComfyCheck;
+  workflow: WorkflowSummary;
+}) {
+  const { saveWorkflowSettings, setMessage } = useAppStore();
+  const [baseUrl, setBaseUrl] = useState(workflow.base_url || "");
+  const [workflowPath, setWorkflowPath] = useState(workflow.workflow_path || "");
+  const [workflowJson, setWorkflowJson] = useState("");
+  const [workflowFilename, setWorkflowFilename] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    setBaseUrl(workflow.base_url || "");
+    setWorkflowPath(workflow.workflow_path || "");
+    setWorkflowJson("");
+    setWorkflowFilename("");
+  }, [workflow.base_url, workflow.workflow_path, workflow.name]);
+
+  async function save() {
+    setSaving(true);
+    setSaveError("");
+    try {
+      await saveWorkflowSettings(workflow.name, {
+        base_url: baseUrl,
+        workflow_path: workflowPath,
+        workflow_json: workflowJson || undefined,
+        workflow_filename: workflowFilename || undefined
+      });
+      setWorkflowJson("");
+      setWorkflowFilename("");
+    } catch (saveFailure) {
+      setSaveError(friendlyError(saveFailure));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function upload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setWorkflowJson(text);
+      setWorkflowFilename(file.name);
+      setWorkflowPath(`保存为 workflows/${file.name.replace(/[^A-Za-z0-9_.-]/g, "_")}`);
+    } catch (uploadFailure) {
+      setMessage(String((uploadFailure as Error).message || uploadFailure));
+    } finally {
+      event.target.value = "";
+    }
+  }
+
+  return (
+    <article className="panel p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+            <Boxes size={15} />
+            {workflowKindLabel(workflow.kind)}
+          </div>
+          <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
+        </div>
+        <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
+      </div>
+
+      <dl className="mt-5 grid gap-3 text-sm">
+        <InfoRow label="配置档" value={workflow.name} />
+        <InfoRow label="配置变量" value={`${workflow.base_url_env} / ${workflow.workflow_env} / ${workflow.profile_env}`} />
+      </dl>
+
+      <div className="mt-5 grid gap-3">
+        <LabeledInput label="ComfyUI 地址" value={baseUrl} onChange={setBaseUrl} />
+        <LabeledInput label="工作流路径" value={workflowPath} onChange={setWorkflowPath} />
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="btn">
+            <UploadCloud size={17} />
+            上传 JSON
+            <input className="hidden" type="file" accept="application/json,.json" onChange={upload} />
+          </label>
+          <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+            {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+            保存配置
+          </button>
+          <button className="btn" disabled={checking} onClick={onCheck} type="button">
+            {checking ? <Loader2 className="animate-spin" size={17} /> : <CheckCircle2 size={17} />}
+            检查连接
+          </button>
+        </div>
+        {workflowFilename ? <div className="truncate text-xs text-slate-500">已选择：{workflowFilename}</div> : null}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {workflow.tags.map((tag) => (
+          <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+            {tag}
+          </span>
+        ))}
+      </div>
+      {saveError ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{saveError}</div> : null}
+      {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      {result ? <ComfyCheckResult result={result} /> : null}
+    </article>
   );
 }
 

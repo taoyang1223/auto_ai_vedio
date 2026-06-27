@@ -53,6 +53,13 @@ export type WorkflowSummary = {
   tags: string[];
 };
 
+export type WorkflowSettingsPayload = {
+  base_url?: string;
+  workflow_path?: string;
+  workflow_json?: string;
+  workflow_filename?: string;
+};
+
 export type ProjectDetail = ProjectSummary & {
   config: {
     aspect_ratio: string;

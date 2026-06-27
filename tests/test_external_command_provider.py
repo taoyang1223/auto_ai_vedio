@@ -151,6 +151,42 @@ sys.exit(7)
     assert "S01" not in manifest.get("clips", {})
 
 
+def test_external_command_provider_passes_configured_env(tmp_path: Path):
+    env_copy = tmp_path / "env.json"
+    adapter = _write_adapter(
+        tmp_path / "adapter_env.py",
+        f"""
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--job", required=True)
+parser.add_argument("--project-root", required=True)
+parser.add_argument("--output", required=True)
+args = parser.parse_args()
+
+Path({str(env_copy)!r}).write_text(json.dumps({{"COMFYUI_BASE_URL": os.environ.get("COMFYUI_BASE_URL")}}), encoding="utf-8")
+Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+Path(args.output).write_text("ok", encoding="utf-8")
+""".lstrip(),
+    )
+    project_root = _external_project(tmp_path, adapter)
+    config_text = (project_root / "project.yaml").read_text(encoding="utf-8")
+    config_text = config_text.replace(
+        "    command:\n",
+        "    env:\n      COMFYUI_BASE_URL: http://127.0.0.1:6006\n    command:\n",
+    )
+    (project_root / "project.yaml").write_text(config_text, encoding="utf-8")
+    project = load_project(project_root)
+
+    result = submit_jobs(project, kind="video", provider_name="local_wan")[0]
+
+    assert result.status == "succeeded"
+    assert json.loads(env_copy.read_text(encoding="utf-8"))["COMFYUI_BASE_URL"] == "http://127.0.0.1:6006"
+
+
 def test_external_command_provider_timeout_is_retryable(tmp_path: Path):
     adapter = _write_adapter(
         tmp_path / "adapter_timeout.py",

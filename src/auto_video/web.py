@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+import yaml
+
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
 from .pipeline import plan_jobs, submit_jobs
@@ -31,6 +33,7 @@ from .workflow_registry import comfyui_wan_adapter_options, list_workflows
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_WORKFLOW_JSON_BYTES = 5 * 1024 * 1024
 STATIC_DIR = Path(__file__).with_name("web_static")
 SESSION_COOKIE = "auto_video_web_session"
 DEFAULT_TOKEN_ENV = "AUTO_VIDEO_WEB_TOKEN"
@@ -253,6 +256,10 @@ def _handler_factory(workspace: Path, *, token: str | None):
             if method == "POST" and tail == ["workflow-check"]:
                 result = _run_project_action(project_root, "comfyui-check", self._read_json())
                 self._send_json({"ok": True, "result": result})
+                return
+            if method == "PUT" and len(tail) == 2 and tail[0] == "workflows":
+                result = _update_workflow_settings(project_root, tail[1], self._read_json())
+                self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
                 return
             if method == "POST" and tail == ["validate"]:
                 result = _run_project_action(project_root, "validate", self._read_json())
@@ -557,10 +564,11 @@ def _first_workflow_profile(project: Any) -> str:
 
 def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> dict[str, Any]:
     options = comfyui_wan_adapter_options(project, profile)
+    workflow_path = payload.get("workflow") or options.get("workflow")
     args = Namespace(
         base_url=payload.get("base_url") or options.get("base_url"),
         base_url_env=options.get("base_url_env"),
-        workflow=payload.get("workflow") or options.get("workflow"),
+        workflow=_runtime_workflow_path(project, workflow_path),
         workflow_env=options.get("workflow_env"),
         timeout=float(payload.get("timeout") or 15),
         require_gpu=bool(payload.get("require_gpu", False)),
@@ -586,6 +594,15 @@ def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> d
     )
     report = run_comfyui_doctor(args)
     return {"profile": profile, **report}
+
+
+def _runtime_workflow_path(project: Any, value: Any) -> str | None:
+    if not value:
+        return None
+    path = Path(str(value))
+    if path.is_absolute():
+        return path.as_posix()
+    return (project.config.root / path).resolve().as_posix()
 
 
 def _payload_only(payload: dict[str, Any]) -> set[str] | None:
@@ -678,6 +695,118 @@ def _write_project_config(root: Path, text: str) -> None:
     except Exception:
         path.write_text(old, encoding="utf-8")
         raise
+
+
+def _update_workflow_settings(root: Path, profile: str, payload: dict[str, Any]) -> dict[str, Any]:
+    profile = profile.strip()
+    if not profile:
+        raise ConfigError("workflow profile is required", fix="Choose a workflow profile.")
+    config_path = root / "project.yaml"
+    old_config = config_path.read_text(encoding="utf-8")
+    old_files: dict[Path, bytes | None] = {}
+
+    data = yaml.safe_load(old_config) or {}
+    if not isinstance(data, dict):
+        raise ConfigError("project.yaml must contain a mapping", fix="Restore a valid project.yaml.")
+    workflows = data.setdefault("comfyui_workflows", {})
+    if not isinstance(workflows, dict):
+        raise ConfigError("comfyui_workflows must be a mapping", fix="Use workflow profile names as keys.")
+    if profile not in workflows or not isinstance(workflows[profile], dict):
+        raise ConfigError(f"工作流配置不存在：{profile}", fix="请先在 project.yaml 的 comfyui_workflows 中添加该配置。")
+
+    raw = workflows[profile]
+    base_url = str(payload.get("base_url") or "").strip()
+    workflow_path = str(payload.get("workflow_path") or "").strip()
+    workflow_json = payload.get("workflow_json")
+
+    if "base_url" in payload:
+        if base_url:
+            raw["base_url"] = base_url.rstrip("/")
+        else:
+            raw.pop("base_url", None)
+    if workflow_json is not None and str(workflow_json).strip():
+        workflow_path = _save_workflow_json(root, profile, payload, str(workflow_json), old_files)
+        raw["workflow_path"] = workflow_path
+    elif "workflow_path" in payload:
+        if workflow_path:
+            raw["workflow_path"] = workflow_path
+        else:
+            raw.pop("workflow_path", None)
+
+    _sync_workflow_env(data, profile, raw)
+
+    try:
+        config_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        validate_project(load_project(root))
+    except Exception:
+        config_path.write_text(old_config, encoding="utf-8")
+        for path, body in old_files.items():
+            if body is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(body)
+        raise
+    return {"workflow": raw}
+
+
+def _save_workflow_json(root: Path, profile: str, payload: dict[str, Any], raw_json: str, old_files: dict[Path, bytes | None]) -> str:
+    body = raw_json.encode("utf-8")
+    if len(body) > MAX_WORKFLOW_JSON_BYTES:
+        raise ConfigError("workflow JSON is too large", fix="Use a workflow JSON smaller than 5 MB.")
+    try:
+        workflow = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise ConfigError("workflow JSON 格式错误", fix=f"请上传 ComfyUI 导出的 API JSON。{exc.msg}") from exc
+    if not isinstance(workflow, dict):
+        raise ConfigError("workflow JSON must contain an object", fix="请上传 ComfyUI 导出的 API JSON 对象。")
+    filename = str(payload.get("workflow_filename") or f"{profile}.json")
+    safe_stem = _safe_asset_name(Path(filename).stem or profile)
+    output = (root / "workflows" / f"{safe_stem}.json").resolve()
+    if root.resolve() not in output.parents:
+        raise ConfigError("workflow path escapes project root", fix="Use a workflow JSON filename without path segments.")
+    if output not in old_files:
+        old_files[output] = output.read_bytes() if output.exists() else None
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(workflow, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return output.relative_to(root.resolve()).as_posix()
+
+
+def _sync_workflow_env(data: dict[str, Any], profile: str, raw: dict[str, Any]) -> None:
+    provider_name = str(raw.get("provider") or "comfyui_wan")
+    base_url_env = str(raw.get("base_url_env") or "COMFYUI_BASE_URL")
+    workflow_env = str(raw.get("workflow_env") or "COMFYUI_WORKFLOW")
+    profile_env = str(raw.get("profile_env") or "COMFYUI_WORKFLOW_PROFILE")
+    assignments = {
+        base_url_env: raw.get("base_url"),
+        workflow_env: raw.get("workflow_path"),
+        profile_env: profile,
+    }
+
+    providers = data.setdefault("providers", {})
+    if isinstance(providers, dict):
+        provider = providers.setdefault(provider_name, {})
+        if isinstance(provider, dict):
+            provider_env = provider.setdefault("env", {})
+            if isinstance(provider_env, dict):
+                _update_env_mapping(provider_env, assignments)
+
+    remote_profiles = data.get("remote_profiles")
+    if isinstance(remote_profiles, dict):
+        for remote_profile in remote_profiles.values():
+            if not isinstance(remote_profile, dict):
+                continue
+            remote_env = remote_profile.setdefault("remote_env", {})
+            if isinstance(remote_env, dict):
+                _update_env_mapping(remote_env, assignments)
+
+
+def _update_env_mapping(env: dict[str, Any], assignments: dict[str, Any]) -> None:
+    for key, value in assignments.items():
+        if value:
+            env[key] = str(value)
+        else:
+            env.pop(key, None)
 
 
 def _write_shots(root: Path, shots: Any) -> None:
