@@ -3,10 +3,12 @@ import json
 import threading
 import time
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from auto_video.project import load_project
+from auto_video.templates import init_project
 from auto_video.web import make_web_server
 
 
@@ -66,6 +68,81 @@ def wait_task(base_url, task_id, *, headers=None):
             return task
         time.sleep(0.05)
     raise AssertionError(f"task {task_id} did not finish")
+
+
+class FakeComfyUIServer:
+    def __init__(self):
+        self.records = []
+        records = self.records
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                records.append(self.path)
+                if self.path == "/system_stats":
+                    payload = {
+                        "system": {"os": "linux"},
+                        "devices": [{"name": "NVIDIA GeForce RTX 5090", "type": "cuda", "vram_total": 32607}],
+                    }
+                elif self.path == "/queue":
+                    payload = {"queue_running": [], "queue_pending": []}
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(payload).encode("utf-8"))
+
+            def log_message(self, format, *args):
+                return
+
+        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    @property
+    def url(self):
+        host, port = self.server.server_address
+        return f"http://{host}:{port}"
+
+    def __enter__(self):
+        self.thread.start()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=5)
+
+
+def write_comfy_workflow(path):
+    workflow = {
+        "218": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative"}},
+        "224": {"class_type": "LoadImage", "inputs": {"image": "input.png"}},
+        "228": {"class_type": "KSamplerAdvanced", "inputs": {"steps": 4, "cfg": 1.0}},
+        "229": {"class_type": "KSamplerAdvanced", "inputs": {"steps": 4, "cfg": 1.0}},
+        "230": {"class_type": "VHS_VideoCombine", "inputs": {"frame_rate": 16, "filename_prefix": "demo"}},
+        "231": {"class_type": "Seed", "inputs": {"seed": 42}},
+        "238": {"class_type": "INTConstant", "inputs": {"value": 2}},
+        "248": {"class_type": "INTConstant", "inputs": {"value": 832}},
+        "257": {"class_type": "PrimitiveStringMultiline", "inputs": {"value": "prompt"}},
+    }
+    path.write_text(json.dumps(workflow, ensure_ascii=False), encoding="utf-8")
+
+
+def append_comfy_workflow(project_root, *, base_url, workflow_path):
+    with (project_root / "project.yaml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            f"""
+comfyui_workflows:
+  local_i2v:
+    title: Local I2V
+    provider: comfyui_wan
+    kind: image_to_video
+    base_url: {base_url}
+    workflow_path: {workflow_path.as_posix()}
+"""
+        )
 
 
 def test_web_serves_app_shell(tmp_path):
@@ -131,6 +208,30 @@ def test_web_missing_project_returns_chinese_error(tmp_path):
 
     assert body["error"] == "项目不存在或配置缺失"
     assert body["fix"] == "请从左侧选择现有项目，或重新新建项目。"
+
+
+def test_web_checks_comfyui_workflow(tmp_path):
+    project_root = tmp_path / "demo"
+    workflow = tmp_path / "workflow.json"
+    init_project(project_root, template_name="demo")
+    write_comfy_workflow(workflow)
+
+    with FakeComfyUIServer() as comfyui:
+        append_comfy_workflow(project_root, base_url=comfyui.url, workflow_path=workflow)
+        with running_web(tmp_path) as base_url:
+            payload = request_json(
+                base_url,
+                "/api/projects/demo/workflow-check",
+                method="POST",
+                payload={"profile": "local_i2v", "require_gpu": True, "require_idle": True},
+            )
+
+    result = payload["result"]
+    assert result["ok"] is True
+    assert result["profile"] == "local_i2v"
+    assert result["base_url"] == comfyui.url
+    assert result["workflow"] == workflow.as_posix()
+    assert comfyui.records == ["/system_stats", "/queue"]
 
 
 def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):

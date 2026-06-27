@@ -46,6 +46,7 @@ export type WorkflowSummary = {
   provider: string;
   kind: string;
   workflow_path?: string;
+  base_url?: string;
   base_url_env: string;
   workflow_env: string;
   profile_env: string;
@@ -91,4 +92,18 @@ export type WebTask = {
   fix?: string | null;
   logs: WebTaskLog[];
   result?: unknown;
+};
+
+export type ComfyCheck = {
+  ok: boolean;
+  profile: string;
+  base_url: string;
+  workflow: string;
+  checks: Array<{
+    name: string;
+    status: "ok" | "warning" | "failed";
+    message: string;
+    fix?: string;
+    details?: Record<string, unknown>;
+  }>;
 };

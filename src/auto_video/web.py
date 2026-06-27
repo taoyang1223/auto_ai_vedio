@@ -8,6 +8,7 @@ import mimetypes
 import os
 import re
 import shutil
+from argparse import Namespace
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .errors import AutoVideoError, ConfigError
+from .comfyui_runtime_doctor import run as run_comfyui_doctor
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
@@ -24,7 +26,7 @@ from .render import assemble_project
 from .templates import init_project, list_templates
 from .validation import validate_project
 from .web_tasks import TaskLogger, WebTaskQueue
-from .workflow_registry import list_workflows
+from .workflow_registry import comfyui_wan_adapter_options, list_workflows
 
 
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -39,6 +41,7 @@ ACTION_LABELS = {
     "probe": "验片",
     "assemble-plan": "合成预案",
     "assemble": "合成成片",
+    "comfyui-check": "检查 ComfyUI 连接",
     "remote-plan": "远程预案",
     "remote-run": "远程执行",
 }
@@ -246,6 +249,10 @@ def _handler_factory(workspace: Path, *, token: str | None):
             if method == "POST" and tail == ["tasks"]:
                 task = _enqueue_project_task(task_queue, project_name, project_root, self._read_json())
                 self._send_json({"ok": True, "task": task}, status=202)
+                return
+            if method == "POST" and tail == ["workflow-check"]:
+                result = _run_project_action(project_root, "comfyui-check", self._read_json())
+                self._send_json({"ok": True, "result": result})
                 return
             if method == "POST" and tail == ["validate"]:
                 result = _run_project_action(project_root, "validate", self._read_json())
@@ -511,6 +518,11 @@ def _run_project_action(
     if action == "assemble":
         logger("开始合成成片")
         return assemble_project(load_project(project_root), dry_run=bool(payload.get("dry_run", False)))
+    if action == "comfyui-check":
+        project = load_project(project_root)
+        profile = str(payload.get("profile") or _first_workflow_profile(project))
+        logger(f"检查 ComfyUI 工作流：{profile}")
+        return _run_comfyui_check(project, profile, payload)
     if action in {"remote-plan", "remote-run"}:
         project = load_project(project_root)
         logger("构建远程执行参数")
@@ -534,6 +546,46 @@ def _run_project_action(
         logger("远程预案生成中" if dry_run else "远程任务执行中")
         return run_remote_worker(project, options, dry_run=dry_run)
     raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
+
+
+def _first_workflow_profile(project: Any) -> str:
+    names = sorted(project.config.comfyui_workflows)
+    if not names:
+        raise ConfigError("项目没有配置 ComfyUI 工作流", fix="请在项目配置中添加 comfyui_workflows。")
+    return names[0]
+
+
+def _run_comfyui_check(project: Any, profile: str, payload: dict[str, Any]) -> dict[str, Any]:
+    options = comfyui_wan_adapter_options(project, profile)
+    args = Namespace(
+        base_url=payload.get("base_url") or options.get("base_url"),
+        base_url_env=options.get("base_url_env"),
+        workflow=payload.get("workflow") or options.get("workflow"),
+        workflow_env=options.get("workflow_env"),
+        timeout=float(payload.get("timeout") or 15),
+        require_gpu=bool(payload.get("require_gpu", False)),
+        require_idle=bool(payload.get("require_idle", False)),
+        image_node=options.get("image_node", "224"),
+        image_input=options.get("image_input", "image"),
+        prompt_node=options.get("prompt_node", "257"),
+        prompt_input=options.get("prompt_input", "value"),
+        negative_node=options.get("negative_node", "218"),
+        negative_input=options.get("negative_input", "text"),
+        seed_node=options.get("seed_node", "231"),
+        seed_input=options.get("seed_input", "seed"),
+        duration_node=options.get("duration_node", "238"),
+        duration_input=options.get("duration_input", "value"),
+        resolution_node=options.get("resolution_node", "248"),
+        resolution_input=options.get("resolution_input", "value"),
+        video_node=options.get("video_node", "230"),
+        frame_rate_input=options.get("frame_rate_input", "frame_rate"),
+        filename_prefix_input=options.get("filename_prefix_input", "filename_prefix"),
+        steps_node=options.get("steps_node", ["228", "229"]),
+        steps_input=options.get("steps_input", "steps"),
+        cfg_input=options.get("cfg_input", "cfg"),
+    )
+    report = run_comfyui_doctor(args)
+    return {"profile": profile, **report}
 
 
 def _payload_only(payload: dict[str, Any]) -> set[str] | None:

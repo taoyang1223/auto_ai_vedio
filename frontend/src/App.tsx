@@ -47,8 +47,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
-import type { ProjectDetail, Shot, WebTask, WebTaskStatus } from "./types";
+import type { ComfyCheck, ProjectDetail, Shot, WebTask, WebTaskStatus } from "./types";
 
 type TabKey = "shots" | "workflow" | "run" | "config";
 
@@ -743,38 +744,115 @@ function SortableShotCard({
 
 function WorkflowPanel() {
   const { detail } = useAppStore();
+  const [checking, setChecking] = useState("");
+  const [results, setResults] = useState<Record<string, ComfyCheck>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   if (!detail) return null;
+  const projectName = detail.name;
+
+  async function check(profile: string) {
+    setChecking(profile);
+    setErrors((current) => ({ ...current, [profile]: "" }));
+    try {
+      const result = await checkComfyWorkflow(projectName, profile);
+      setResults((current) => ({ ...current, [profile]: result }));
+    } catch (error) {
+      setErrors((current) => ({ ...current, [profile]: friendlyError(error) }));
+    } finally {
+      setChecking("");
+    }
+  }
+
   return (
     <section className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
-      {detail.workflows_detail.map((workflow) => (
-        <article key={workflow.name} className="panel p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
-                <Boxes size={15} />
-                {workflowKindLabel(workflow.kind)}
+      {detail.workflows_detail.map((workflow) => {
+        const result = results[workflow.name];
+        const error = errors[workflow.name];
+        return (
+          <article key={workflow.name} className="panel p-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+                  <Boxes size={15} />
+                  {workflowKindLabel(workflow.kind)}
+                </div>
+                <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
               </div>
-              <h2 className="mt-2 text-lg font-semibold text-slate-950">{workflow.title}</h2>
+              <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
             </div>
-            <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">{workflow.provider}</span>
-          </div>
-          <dl className="mt-5 grid gap-3 text-sm">
-            <InfoRow label="配置档" value={workflow.name} />
-            <InfoRow label="工作流文件" value={workflow.workflow_path || "未配置"} />
-            <InfoRow label="服务地址变量" value={workflow.base_url_env} />
-            <InfoRow label="环境变量" value={`${workflow.workflow_env} / ${workflow.profile_env}`} />
-          </dl>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {workflow.tags.map((tag) => (
-              <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
-                {tag}
-              </span>
-            ))}
-          </div>
-        </article>
-      ))}
+            <dl className="mt-5 grid gap-3 text-sm">
+              <InfoRow label="配置档" value={workflow.name} />
+              <InfoRow label="服务地址" value={workflow.base_url || `读取变量 ${workflow.base_url_env}`} />
+              <InfoRow label="工作流文件" value={workflow.workflow_path || `读取变量 ${workflow.workflow_env}`} />
+              <InfoRow label="配置变量" value={`${workflow.base_url_env} / ${workflow.workflow_env} / ${workflow.profile_env}`} />
+            </dl>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button className="btn btn-primary" disabled={checking === workflow.name} onClick={() => check(workflow.name)} type="button">
+                {checking === workflow.name ? <Loader2 className="animate-spin" size={17} /> : <CheckCircle2 size={17} />}
+                检查连接
+              </button>
+              {workflow.tags.map((tag) => (
+                <span key={tag} className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                  {tag}
+                </span>
+              ))}
+            </div>
+            {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+            {result ? <ComfyCheckResult result={result} /> : null}
+          </article>
+        );
+      })}
     </section>
   );
+}
+
+function ComfyCheckResult({ result }: { result: ComfyCheck }) {
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-slate-800">连接检查结果</div>
+        <TaskStatusBadge status={result.ok ? "succeeded" : "failed"} />
+      </div>
+      <div className="mb-3 grid gap-1 text-xs text-slate-500">
+        <div className="break-words">地址：{result.base_url || "未解析"}</div>
+        <div className="break-words">工作流：{result.workflow || "未解析"}</div>
+      </div>
+      <div className="grid gap-2">
+        {result.checks.map((check) => (
+          <div key={check.name} className="rounded-md border border-white bg-white px-3 py-2 text-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="font-medium text-slate-800">{comfyCheckLabel(check.name)}</div>
+              <ComfyCheckBadge status={check.status} />
+            </div>
+            <div className="mt-1 whitespace-pre-wrap break-words text-xs text-slate-500">{check.message}</div>
+            {check.fix ? <div className="mt-1 whitespace-pre-wrap break-words text-xs text-amber-700">{check.fix}</div> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ComfyCheckBadge({ status }: { status: ComfyCheck["checks"][number]["status"] }) {
+  const className = {
+    ok: "border-teal-200 bg-teal-50 text-teal-700",
+    warning: "border-amber-200 bg-amber-50 text-amber-700",
+    failed: "border-red-200 bg-red-50 text-red-700"
+  }[status];
+  const label = { ok: "正常", warning: "注意", failed: "失败" }[status];
+  return <span className={`rounded-md border px-2 py-0.5 text-xs ${className}`}>{label}</span>;
+}
+
+function comfyCheckLabel(value: string) {
+  return {
+    base_url: "服务地址",
+    system_stats: "系统状态",
+    gpu: "显卡状态",
+    queue: "队列状态",
+    queue_idle: "空闲状态",
+    workflow_path: "工作流路径",
+    workflow: "工作流结构"
+  }[value] || value;
 }
 
 function RunPanel() {

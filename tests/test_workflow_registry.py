@@ -71,6 +71,7 @@ def test_workflow_registry_lists_and_shows_profiles(demo_project_files):
             "provider": "comfyui_wan",
             "kind": "image_to_video",
             "workflow_path": "/root/zealman-app/workflows/G10.json",
+            "base_url": "http://127.0.0.1:6006",
             "base_url_env": "COMFYUI_BASE_URL",
             "workflow_env": "COMFYUI_WORKFLOW",
             "profile_env": "COMFYUI_WORKFLOW_PROFILE",

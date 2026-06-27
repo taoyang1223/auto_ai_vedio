@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ApiEnvelope, ProjectDetail, ProjectSummary, TemplateInfo, WebTask } from "./types";
+import type { ApiEnvelope, ComfyCheck, ProjectDetail, ProjectSummary, TemplateInfo, WebTask } from "./types";
 
 const client = axios.create({
   headers: { "Content-Type": "application/json" },
@@ -82,6 +82,15 @@ export async function uploadFirstFrame(name: string, shotId: string, file: File)
     data_url: dataUrl
   });
   return data.project;
+}
+
+export async function checkComfyWorkflow(name: string, profile: string): Promise<ComfyCheck> {
+  const { data } = await client.post<ApiEnvelope<{ result: ComfyCheck }>>(`/api/projects/${encodeURIComponent(name)}/workflow-check`, {
+    profile,
+    require_idle: false,
+    require_gpu: true
+  });
+  return data.result;
 }
 
 export async function enqueueProjectTask(

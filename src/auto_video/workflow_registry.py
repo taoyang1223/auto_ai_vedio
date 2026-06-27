@@ -86,6 +86,7 @@ def _summary(name: str, raw: dict[str, Any]) -> dict[str, Any]:
         "provider": str(raw.get("provider") or "comfyui_wan"),
         "kind": str(raw.get("kind") or "image_to_video"),
         "workflow_path": raw.get("workflow_path"),
+        "base_url": raw.get("base_url"),
         "base_url_env": str(raw.get("base_url_env") or "COMFYUI_BASE_URL"),
         "workflow_env": str(raw.get("workflow_env") or "COMFYUI_WORKFLOW"),
         "profile_env": str(raw.get("profile_env") or WORKFLOW_PROFILE_ENV),
