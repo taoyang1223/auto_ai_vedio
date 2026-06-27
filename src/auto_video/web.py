@@ -22,7 +22,7 @@ from .comfyui_runtime_doctor import run as run_comfyui_doctor
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
-from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
+from .remote_profiles import build_remote_run_options_from_profile
 from .remote_transport import run_remote_worker
 from .render import assemble_project
 from .templates import init_project, list_templates
@@ -261,6 +261,10 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 result = _update_workflow_settings(project_root, tail[1], self._read_json())
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
                 return
+            if method == "PUT" and len(tail) == 2 and tail[0] == "remote-profiles":
+                result = _update_remote_profile(project_root, tail[1], self._read_json())
+                self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
+                return
             if method == "POST" and tail == ["validate"]:
                 result = _run_project_action(project_root, "validate", self._read_json())
                 self._send_json({"ok": True, **result})
@@ -431,9 +435,31 @@ def _project_detail(root: Path) -> dict[str, Any]:
             "default_video_provider": project.config.default_video_provider,
         },
         "shots_detail": shots,
-        "remote_profiles_detail": list_remote_profiles(project),
+        "remote_profiles_detail": _remote_profiles_detail(project),
         "workflows_detail": list_workflows(project),
         "renders": project.manifest.get("renders", {}),
+    }
+
+
+def _remote_profiles_detail(project: Any) -> list[dict[str, Any]]:
+    details: list[dict[str, Any]] = []
+    for name, raw in sorted(project.config.remote_profiles.items()):
+        details.append(_remote_profile_detail(name, raw))
+    return details
+
+
+def _remote_profile_detail(name: str, raw: dict[str, Any]) -> dict[str, Any]:
+    ssh_options = _profile_string_list(raw.get("ssh_options"))
+    return {
+        "name": name,
+        "host": str(raw.get("host") or ""),
+        "remote_dir": str(raw.get("remote_dir") or ""),
+        "local_dir": str(raw.get("local_dir") or ""),
+        "remote_auto_video": str(raw.get("remote_auto_video") or ""),
+        "ssh_port": _ssh_port_from_options(ssh_options),
+        "ssh_options": ssh_options,
+        "rsync_options": _profile_string_list(raw.get("rsync_options")),
+        "remote_env": _profile_env_mapping(raw.get("remote_env")),
     }
 
 
@@ -748,6 +774,134 @@ def _update_workflow_settings(root: Path, profile: str, payload: dict[str, Any])
                 path.write_bytes(body)
         raise
     return {"workflow": raw}
+
+
+def _update_remote_profile(root: Path, profile: str, payload: dict[str, Any]) -> dict[str, Any]:
+    profile = profile.strip()
+    if not profile:
+        raise ConfigError("remote profile is required", fix="Choose a remote profile.")
+    config_path = root / "project.yaml"
+    old_config = config_path.read_text(encoding="utf-8")
+
+    data = yaml.safe_load(old_config) or {}
+    if not isinstance(data, dict):
+        raise ConfigError("project.yaml must contain a mapping", fix="Restore a valid project.yaml.")
+    profiles = data.setdefault("remote_profiles", {})
+    if not isinstance(profiles, dict):
+        raise ConfigError("remote_profiles must be a mapping", fix="Use profile names as keys.")
+    if profile not in profiles or not isinstance(profiles[profile], dict):
+        raise ConfigError(f"远程配置不存在：{profile}", fix="请先在 project.yaml 的 remote_profiles 中添加该配置。")
+
+    raw = profiles[profile]
+    for key in ("host", "remote_dir", "local_dir", "remote_auto_video"):
+        if key not in payload:
+            continue
+        value = str(payload.get(key) or "").strip()
+        if value:
+            raw[key] = value
+        else:
+            raw.pop(key, None)
+    if "ssh_port" in payload:
+        ssh_options = _with_ssh_port(_profile_string_list(raw.get("ssh_options")), payload.get("ssh_port"))
+        if ssh_options:
+            raw["ssh_options"] = ssh_options
+        else:
+            raw.pop("ssh_options", None)
+
+    try:
+        config_path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        project = load_project(root)
+        validate_project(project)
+        _validate_remote_profile_if_ready(project, profile)
+    except Exception:
+        config_path.write_text(old_config, encoding="utf-8")
+        raise
+    return {"profile": _remote_profile_detail(profile, raw)}
+
+
+def _validate_remote_profile_if_ready(project: Any, profile: str) -> None:
+    raw = project.config.remote_profiles.get(profile, {})
+    host = str(raw.get("host") or "")
+    remote_dir = str(raw.get("remote_dir") or "")
+    if not _profile_value_ready(host) or not _profile_value_ready(remote_dir):
+        return
+    options = build_remote_run_options_from_profile(
+        project,
+        profile_name=profile,
+        host=None,
+        remote_dir=None,
+        provider_name="comfyui_wan",
+        kind="video",
+        only=None,
+        failed_only=False,
+        skip_succeeded=False,
+        local_dir=None,
+        remote_auto_video=None,
+        ssh_options=(),
+        rsync_options=(),
+        remote_env=(),
+    )
+    run_remote_worker(project, options, dry_run=True)
+
+
+def _profile_value_ready(value: str) -> bool:
+    return bool(value.strip()) and "<" not in value and ">" not in value
+
+
+def _profile_string_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    return []
+
+
+def _profile_env_mapping(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {str(key): str(env_value) for key, env_value in value.items()}
+    if isinstance(value, list):
+        result: dict[str, str] = {}
+        for item in value:
+            text = str(item)
+            if "=" in text:
+                key, env_value = text.split("=", 1)
+                result[key] = env_value
+        return result
+    return {}
+
+
+def _ssh_port_from_options(options: list[str]) -> str:
+    for option in options:
+        value = option.strip()
+        lower = value.lower()
+        port = ""
+        if lower.startswith("port="):
+            port = value.split("=", 1)[1].strip()
+        elif lower.startswith("port "):
+            port = value.split(None, 1)[1].strip()
+        if port and "<" not in port and ">" not in port:
+            return port
+    return ""
+
+
+def _with_ssh_port(options: list[str], port: Any) -> list[str]:
+    kept = [option for option in options if not _is_ssh_port_option(option)]
+    port_text = str(port or "").strip()
+    if not port_text:
+        return kept
+    if not port_text.isdigit():
+        raise ConfigError("SSH 端口必须是数字", fix="请填写 AutoDL 实例 SSH 命令中的 -p 端口，例如 13159。")
+    port_number = int(port_text)
+    if port_number < 1 or port_number > 65535:
+        raise ConfigError("SSH 端口超出范围", fix="请填写 1 到 65535 之间的端口。")
+    return [*kept, f"Port={port_number}"]
+
+
+def _is_ssh_port_option(option: str) -> bool:
+    lower = option.strip().lower()
+    return lower.startswith("port=") or lower.startswith("port ")
 
 
 def _save_workflow_json(root: Path, profile: str, payload: dict[str, Any], raw_json: str, old_files: dict[Path, bytes | None]) -> str:
@@ -1269,8 +1423,9 @@ async function uploadFirstFrame(shotId, file) {
 async function runAction(action) {
   const output = document.getElementById("actionOutput");
   output.textContent = "running...";
+  const remoteProfile = (state.detail.remote_profiles_detail || [])[0];
   const body = action === "remote-plan"
-    ? { profile: (state.detail.remote_profiles_detail || [])[0], provider: "comfyui_wan", kind: "video" }
+    ? { profile: remoteProfile && (remoteProfile.name || remoteProfile), provider: "comfyui_wan", kind: "video" }
     : action === "jobs-plan"
       ? { provider: state.detail.config.default_video_provider, kind: "video" }
       : action === "probe"

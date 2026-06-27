@@ -278,6 +278,54 @@ def test_web_updates_comfyui_workflow_settings(tmp_path):
     assert remote_env["COMFYUI_WORKFLOW"] == "workflows/wan_api.json"
 
 
+def test_web_api_updates_remote_profile_and_plans_remote_run(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        payload = request_json(
+            base_url,
+            "/api/projects/wan_story/remote-profiles/autodl_5090",
+            method="PUT",
+            payload={
+                "host": "root@connect.westd.seetacloud.com",
+                "ssh_port": "13159",
+                "remote_dir": "/root/auto-video/jobs/wan_story",
+                "local_dir": "/tmp/auto-video-wan_story",
+                "remote_auto_video": "/opt/auto-ai-video/.venv/bin/auto-video",
+            },
+        )
+        task_payload = request_json(
+            base_url,
+            "/api/projects/wan_story/tasks",
+            method="POST",
+            payload={
+                "action": "remote-plan",
+                "payload": {"profile": "autodl_5090", "provider": "comfyui_wan", "kind": "video"},
+            },
+        )
+        task = wait_task(base_url, task_payload["task"]["id"])
+
+    project = load_project(tmp_path / "wan_story")
+    remote_profile = project.config.remote_profiles["autodl_5090"]
+    detail_profile = payload["project"]["remote_profiles_detail"][0]
+
+    assert detail_profile["host"] == "root@connect.westd.seetacloud.com"
+    assert detail_profile["ssh_port"] == "13159"
+    assert remote_profile["host"] == "root@connect.westd.seetacloud.com"
+    assert remote_profile["remote_dir"] == "/root/auto-video/jobs/wan_story"
+    assert remote_profile["local_dir"] == "/tmp/auto-video-wan_story"
+    assert remote_profile["remote_auto_video"] == "/opt/auto-ai-video/.venv/bin/auto-video"
+    assert remote_profile["ssh_options"] == ["Port=13159"]
+    assert task["status"] == "succeeded"
+    assert task["result"]["dry_run"] is True
+    assert task["result"]["host"] == "root@connect.westd.seetacloud.com"
+    assert "Port=13159" in task["result"]["commands"]["run"]
+
+
 def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

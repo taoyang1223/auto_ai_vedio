@@ -60,6 +60,26 @@ export type WorkflowSettingsPayload = {
   workflow_filename?: string;
 };
 
+export type RemoteProfileSummary = {
+  name: string;
+  host: string;
+  remote_dir: string;
+  local_dir: string;
+  remote_auto_video: string;
+  ssh_port: string;
+  ssh_options: string[];
+  rsync_options: string[];
+  remote_env: Record<string, string>;
+};
+
+export type RemoteProfilePayload = {
+  host?: string;
+  remote_dir?: string;
+  local_dir?: string;
+  remote_auto_video?: string;
+  ssh_port?: string;
+};
+
 export type ProjectDetail = ProjectSummary & {
   config: {
     aspect_ratio: string;
@@ -69,7 +89,7 @@ export type ProjectDetail = ProjectSummary & {
     default_video_provider: string;
   };
   shots_detail: Shot[];
-  remote_profiles_detail: string[];
+  remote_profiles_detail: RemoteProfileSummary[];
   workflows_detail: WorkflowSummary[];
   renders: Record<string, unknown>;
 };

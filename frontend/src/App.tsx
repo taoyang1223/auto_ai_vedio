@@ -49,7 +49,7 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
-import type { ComfyCheck, ProjectDetail, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
+import type { ComfyCheck, ProjectDetail, RemoteProfileSummary, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
 
 type TabKey = "shots" | "workflow" | "run" | "config";
 
@@ -764,17 +764,24 @@ function WorkflowPanel() {
   }
 
   return (
-    <section className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
-      {detail.workflows_detail.map((workflow) => (
-        <WorkflowCard
-          key={workflow.name}
-          checking={checking === workflow.name}
-          error={errors[workflow.name]}
-          onCheck={() => check(workflow.name)}
-          result={results[workflow.name]}
-          workflow={workflow}
-        />
-      ))}
+    <section className="grid gap-4">
+      <div className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
+        {detail.workflows_detail.map((workflow) => (
+          <WorkflowCard
+            key={workflow.name}
+            checking={checking === workflow.name}
+            error={errors[workflow.name]}
+            onCheck={() => check(workflow.name)}
+            result={results[workflow.name]}
+            workflow={workflow}
+          />
+        ))}
+      </div>
+      <div className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
+        {detail.remote_profiles_detail.map((profile) => (
+          <RemoteProfileCard key={profile.name} profile={profile} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -894,6 +901,88 @@ function WorkflowCard({
   );
 }
 
+function RemoteProfileCard({ profile }: { profile: RemoteProfileSummary }) {
+  const { saveRemoteProfile } = useAppStore();
+  const [host, setHost] = useState(profile.host || "");
+  const [sshPort, setSshPort] = useState(profile.ssh_port || "");
+  const [remoteDir, setRemoteDir] = useState(profile.remote_dir || "");
+  const [localDir, setLocalDir] = useState(profile.local_dir || "");
+  const [remoteAutoVideo, setRemoteAutoVideo] = useState(profile.remote_auto_video || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    setHost(profile.host || "");
+    setSshPort(profile.ssh_port || "");
+    setRemoteDir(profile.remote_dir || "");
+    setLocalDir(profile.local_dir || "");
+    setRemoteAutoVideo(profile.remote_auto_video || "");
+  }, [profile.host, profile.local_dir, profile.name, profile.remote_auto_video, profile.remote_dir, profile.ssh_port]);
+
+  async function save() {
+    setSaving(true);
+    setError("");
+    try {
+      await saveRemoteProfile(profile.name, {
+        host,
+        ssh_port: sshPort,
+        remote_dir: remoteDir,
+        local_dir: localDir,
+        remote_auto_video: remoteAutoVideo
+      });
+    } catch (saveFailure) {
+      setError(friendlyError(saveFailure));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const envEntries = Object.entries(profile.remote_env || {});
+
+  return (
+    <article className="panel p-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-medium text-teal-700">
+            <Cloud size={15} />
+            远程机器
+          </div>
+          <h2 className="mt-2 text-lg font-semibold text-slate-950">{profile.name}</h2>
+        </div>
+        <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">AutoDL</span>
+      </div>
+
+      <div className="mt-5 grid grid-cols-[1fr_140px] gap-3 max-md:grid-cols-1">
+        <LabeledInput label="SSH 主机" value={host} onChange={setHost} />
+        <LabeledInput label="SSH 端口" type="number" value={sshPort} onChange={setSshPort} />
+      </div>
+      <div className="mt-3 grid gap-3">
+        <LabeledInput label="远程目录" value={remoteDir} onChange={setRemoteDir} />
+        <LabeledInput label="本地缓存目录" value={localDir} onChange={setLocalDir} />
+        <LabeledInput label="远端 auto-video 命令" value={remoteAutoVideo} onChange={setRemoteAutoVideo} />
+      </div>
+
+      {envEntries.length ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {envEntries.map(([name, value]) => (
+            <span key={name} className="max-w-full truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+              {name}={value}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex justify-end">
+        <button className="btn btn-primary" disabled={saving} onClick={save} type="button">
+          {saving ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+          保存远程配置
+        </button>
+      </div>
+      {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+    </article>
+  );
+}
+
 function ComfyCheckResult({ result }: { result: ComfyCheck }) {
   return (
     <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -976,12 +1065,26 @@ function RunPanel() {
   if (!detail) return null;
   const project = detail;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) || tasks[0] || null;
+  const firstRemoteProfile = project.remote_profiles_detail[0]?.name || "";
 
   const actions = [
     { key: "validate", label: "校验项目", icon: CheckCircle2, payload: {} },
     { key: "jobs-plan", label: "生成计划", icon: Clapperboard, payload: { provider: project.config.default_video_provider, kind: "video" } },
     { key: "generate", label: "提交生成", icon: Play, payload: { provider: project.config.default_video_provider, kind: "video" } },
-    { key: "remote-plan", label: "远程预案", icon: Cloud, payload: { profile: project.remote_profiles_detail[0], provider: "comfyui_wan", kind: "video" } },
+    {
+      key: "remote-plan",
+      label: "远程预案",
+      icon: Cloud,
+      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      disabled: !firstRemoteProfile
+    },
+    {
+      key: "remote-run",
+      label: "远程执行",
+      icon: Cloud,
+      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      disabled: !firstRemoteProfile
+    },
     { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
     { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} }
   ];
@@ -1033,7 +1136,14 @@ function RunPanel() {
             {actions.map((action) => {
               const Icon = action.icon;
               return (
-                <button key={action.key} className="btn justify-start" disabled={Boolean(busy)} onClick={() => run(action)} type="button">
+                <button
+                  key={action.key}
+                  className="btn justify-start"
+                  disabled={Boolean(busy) || action.disabled}
+                  onClick={() => run(action)}
+                  title={action.disabled ? "请先配置远程机器" : action.label}
+                  type="button"
+                >
                   {busy === action.key ? <Loader2 className="animate-spin" size={17} /> : <Icon size={17} />}
                   {action.label}
                 </button>

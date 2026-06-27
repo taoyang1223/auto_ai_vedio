@@ -1,5 +1,14 @@
 import axios from "axios";
-import type { ApiEnvelope, ComfyCheck, ProjectDetail, ProjectSummary, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
+import type {
+  ApiEnvelope,
+  ComfyCheck,
+  ProjectDetail,
+  ProjectSummary,
+  RemoteProfilePayload,
+  TemplateInfo,
+  WebTask,
+  WorkflowSettingsPayload
+} from "./types";
 
 const client = axios.create({
   headers: { "Content-Type": "application/json" },
@@ -96,6 +105,14 @@ export async function checkComfyWorkflow(name: string, profile: string): Promise
 export async function updateWorkflowSettings(name: string, profile: string, payload: WorkflowSettingsPayload): Promise<ProjectDetail> {
   const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(
     `/api/projects/${encodeURIComponent(name)}/workflows/${encodeURIComponent(profile)}`,
+    payload
+  );
+  return data.project;
+}
+
+export async function updateRemoteProfile(name: string, profile: string, payload: RemoteProfilePayload): Promise<ProjectDetail> {
+  const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(
+    `/api/projects/${encodeURIComponent(name)}/remote-profiles/${encodeURIComponent(profile)}`,
     payload
   );
   return data.project;

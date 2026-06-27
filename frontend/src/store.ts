@@ -15,10 +15,11 @@ import {
   logout,
   saveConfig,
   saveShots,
+  updateRemoteProfile,
   updateWorkflowSettings,
   uploadFirstFrame
 } from "./api";
-import type { ProjectDetail, ProjectSummary, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
+import type { ProjectDetail, ProjectSummary, RemoteProfilePayload, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
 
 type AppState = {
   workspace: string;
@@ -42,6 +43,7 @@ type AppState = {
   persistShots: () => Promise<void>;
   persistConfig: (text: string) => Promise<void>;
   saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
+  saveRemoteProfile: (profile: string, payload: RemoteProfilePayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
   refreshProjects: () => Promise<void>;
   refreshTasks: (project?: string) => Promise<void>;
@@ -197,6 +199,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     const saved = await updateWorkflowSettings(activeProject, profile, payload);
     const configText = await fetchConfig(activeProject);
     set({ detail: saved, configText, message: "工作流配置已保存" });
+    await get().refreshProjects();
+    return saved;
+  },
+
+  saveRemoteProfile: async (profile: string, payload: RemoteProfilePayload) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await updateRemoteProfile(activeProject, profile, payload);
+    const configText = await fetchConfig(activeProject);
+    set({ detail: saved, configText, message: "远程配置已保存" });
     await get().refreshProjects();
     return saved;
   },
