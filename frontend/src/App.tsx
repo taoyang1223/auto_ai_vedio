@@ -24,6 +24,7 @@ import {
   Clapperboard,
   Clock,
   Cloud,
+  Copy,
   Eye,
   Film,
   GripVertical,
@@ -53,6 +54,7 @@ import type {
   AssetLibraryItem,
   AssetRef,
   ComfyCheck,
+  FirstFramePrompt,
   ProjectDetail,
   PromptProfile,
   ScriptDraftResult,
@@ -63,11 +65,12 @@ import type {
   WorkflowSummary
 } from "./types";
 
-type TabKey = "script" | "assets" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
+type TabKey = "script" | "assets" | "first_frames" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
   { key: "script", label: "脚本拆镜", icon: Sparkles },
   { key: "assets", label: "素材库", icon: ImagePlus },
+  { key: "first_frames", label: "首帧设计", icon: ImagePlus },
   { key: "shots", label: "分镜编排", icon: Clapperboard },
   { key: "prompt", label: "提示词", icon: Wand2 },
   { key: "review", label: "成片审看", icon: Eye },
@@ -435,6 +438,7 @@ function ProjectConsole() {
 
       {tab === "script" ? <ScriptStoryboardPanel /> : null}
       {tab === "assets" ? <AssetLibraryPanel /> : null}
+      {tab === "first_frames" ? <FirstFramePanel /> : null}
       {tab === "shots" ? <ShotsPanel /> : null}
       {tab === "prompt" ? <PromptProfilePanel /> : null}
       {tab === "review" ? <ReviewPanel /> : null}
@@ -619,7 +623,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       label: "首帧素材",
       metric: `${firstFrames}/${totalShots} 已关联`,
       status: totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
-      tab: "shots",
+      tab: "first_frames",
       icon: ImagePlus
     },
     {
@@ -1194,12 +1198,275 @@ function fileToDataUrl(file: File) {
   });
 }
 
+async function copyToClipboard(value: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const ok = document.execCommand("copy");
+  textarea.remove();
+  if (!ok) {
+    throw new Error("复制失败，请手动选中提示词复制。");
+  }
+}
+
 function assetRoleLabel(value: string) {
   return assetRoleOptions.find((option) => option.value === value)?.label || value;
 }
 
 function assetUsageLabel(value: string) {
   return assetUsageOptions.find((option) => option.value === value)?.label || value;
+}
+
+function FirstFramePanel() {
+  const { detail, loadFirstFramePrompts, saveFirstFrameDrafts, setMessage, uploadFrame } = useAppStore();
+  const [prompts, setPrompts] = useState<FirstFramePrompt[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    reloadPrompts();
+  }, [detail?.name]);
+
+  if (!detail) return null;
+  const total = detail.shots_detail.length;
+  const ready = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
+  const customized = prompts.filter((prompt) => prompt.prompt !== prompt.generated_prompt || prompt.negative_prompt !== prompt.generated_negative_prompt).length;
+
+  async function reloadPrompts() {
+    setBusy("load");
+    setError("");
+    try {
+      setPrompts(await loadFirstFramePrompts());
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveAll() {
+    setBusy("save");
+    setError("");
+    try {
+      setPrompts(await saveFirstFrameDrafts(prompts));
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function updatePrompt(shotId: string, key: "prompt" | "negative_prompt", value: string) {
+    setPrompts((current) => current.map((item) => (item.shot_id === shotId ? { ...item, [key]: value } : item)));
+  }
+
+  function restoreGenerated(shotId: string) {
+    setPrompts((current) =>
+      current.map((item) =>
+        item.shot_id === shotId
+          ? {
+              ...item,
+              prompt: item.generated_prompt,
+              negative_prompt: item.generated_negative_prompt
+            }
+          : item
+      )
+    );
+  }
+
+  async function copyPrompt(prompt: FirstFramePrompt) {
+    const body = `${prompt.prompt}\n\nNegative prompt:\n${prompt.negative_prompt}`;
+    try {
+      await copyToClipboard(body);
+      setMessage(`${prompt.shot_id} 首帧提示词已复制`);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    }
+  }
+
+  async function uploadShotFrame(shotId: string, file: File) {
+    setBusy(`upload-${shotId}`);
+    setError("");
+    try {
+      await uploadFrame(shotId, file);
+      setMessage(`${shotId} 首帧已上传`);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid gap-4">
+      <article className="panel p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <ImagePlus size={18} className="text-teal-700" />
+              首帧设计
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {ready}/{total} 已上传 · {customized} 个自定义提示词
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn" disabled={busy === "load"} onClick={reloadPrompts} type="button">
+              {busy === "load" ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
+              刷新
+            </button>
+            <button className="btn btn-primary" disabled={busy === "save" || !prompts.length} onClick={saveAll} type="button">
+              {busy === "save" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+              保存全部
+            </button>
+          </div>
+        </div>
+        {error ? <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      </article>
+
+      <div className="grid grid-cols-2 gap-4 max-2xl:grid-cols-1">
+        {prompts.map((prompt) => {
+          const shot = detail.shots_detail.find((item) => item.id === prompt.shot_id);
+          return (
+            <FirstFrameCard
+              key={prompt.shot_id}
+              busy={busy}
+              prompt={prompt}
+              projectName={detail.name}
+              shot={shot}
+              onCopy={() => copyPrompt(prompt)}
+              onRestore={() => restoreGenerated(prompt.shot_id)}
+              onUpdate={(key, value) => updatePrompt(prompt.shot_id, key, value)}
+              onUpload={(file) => uploadShotFrame(prompt.shot_id, file)}
+            />
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function FirstFrameCard({
+  busy,
+  onCopy,
+  onRestore,
+  onUpdate,
+  onUpload,
+  projectName,
+  prompt,
+  shot
+}: {
+  busy: string;
+  onCopy: () => void;
+  onRestore: () => void;
+  onUpdate: (key: "prompt" | "negative_prompt", value: string) => void;
+  onUpload: (file: File) => void;
+  projectName: string;
+  prompt: FirstFramePrompt;
+  shot?: Shot;
+}) {
+  const firstFrame = shot ? firstFrameRef(shot) : prompt.first_frame_path;
+  const isCustom = prompt.prompt !== prompt.generated_prompt || prompt.negative_prompt !== prompt.generated_negative_prompt;
+  const uploadBusy = busy === `upload-${prompt.shot_id}`;
+
+  function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    onUpload(file);
+    event.currentTarget.value = "";
+  }
+
+  return (
+    <article className="panel overflow-hidden">
+      <div className="flex min-h-16 items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="text-lg font-bold text-teal-700">{prompt.shot_id}</div>
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-slate-950">{prompt.title || shot?.title || "未命名分镜"}</div>
+            <div className="mt-0.5 text-xs text-slate-500">{prompt.duration}s · {prompt.provider}</div>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <span className={`inline-flex h-7 items-center rounded-md border px-2 text-xs ${firstFrame ? "border-teal-200 bg-teal-50 text-teal-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+            {firstFrame ? "已有首帧" : "待上传"}
+          </span>
+          <span className={`inline-flex h-7 items-center rounded-md border px-2 text-xs ${isCustom ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+            {isCustom ? "自定义" : "自动草稿"}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[188px_1fr] gap-4 p-4 max-md:grid-cols-1">
+        <div className="grid gap-3">
+          <div className="aspect-video overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+            {firstFrame ? (
+              <img className="h-full w-full object-cover" src={mediaUrl(projectName, firstFrame)} alt={`${prompt.shot_id} 首帧`} />
+            ) : (
+              <div className="grid h-full place-items-center bg-gradient-to-br from-slate-100 to-teal-50 text-slate-400">
+                <ImagePlus size={30} />
+              </div>
+            )}
+          </div>
+          <label className={`btn justify-start ${uploadBusy ? "opacity-70" : ""}`}>
+            {uploadBusy ? <Loader2 className="animate-spin" size={17} /> : <UploadCloud size={17} />}
+            上传首帧
+            <input className="hidden" type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadBusy} onChange={handleUpload} />
+          </label>
+          {prompt.refs.length ? (
+            <div className="flex flex-wrap gap-1">
+              {prompt.refs.map((ref) => (
+                <span key={`${prompt.shot_id}-${ref.path}`} className="max-w-full truncate rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
+                  {ref.role_label || ref.role} · {ref.usage_label || ref.usage}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="grid gap-3">
+          <LabeledTextarea
+            label="首帧提示词"
+            rows={9}
+            value={prompt.prompt}
+            onChange={(value) => onUpdate("prompt", value)}
+          />
+          <LabeledTextarea
+            label="负面提示词"
+            rows={3}
+            value={prompt.negative_prompt}
+            onChange={(value) => onUpdate("negative_prompt", value)}
+          />
+          <div className="flex flex-wrap justify-end gap-2">
+            <button className="btn" onClick={onRestore} type="button">
+              <RefreshCw size={17} />
+              恢复自动草稿
+            </button>
+            <button className="btn btn-primary" onClick={onCopy} type="button">
+              <Copy size={17} />
+              复制提示词
+            </button>
+          </div>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 function ShotsPanel() {

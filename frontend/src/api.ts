@@ -5,6 +5,7 @@ import type {
   AssetRef,
   AssetUploadPayload,
   ComfyCheck,
+  FirstFramePrompt,
   PromptProfile,
   ProjectDetail,
   ProjectSummary,
@@ -108,6 +109,27 @@ export async function deleteAsset(name: string, assetId: string): Promise<{ proj
     `/api/projects/${encodeURIComponent(name)}/assets/${encodeURIComponent(assetId)}`
   );
   return { project: data.project, assets: data.assets };
+}
+
+export async function fetchFirstFramePrompts(name: string): Promise<FirstFramePrompt[]> {
+  const { data } = await client.get<ApiEnvelope<{ prompts: FirstFramePrompt[] }>>(
+    `/api/projects/${encodeURIComponent(name)}/first-frame-prompts`
+  );
+  return data.prompts;
+}
+
+export async function saveFirstFramePrompts(name: string, prompts: FirstFramePrompt[]): Promise<FirstFramePrompt[]> {
+  const { data } = await client.put<ApiEnvelope<{ prompts: FirstFramePrompt[] }>>(
+    `/api/projects/${encodeURIComponent(name)}/first-frame-prompts`,
+    {
+      prompts: prompts.map((prompt) => ({
+        shot_id: prompt.shot_id,
+        prompt: prompt.prompt,
+        negative_prompt: prompt.negative_prompt
+      }))
+    }
+  );
+  return data.prompts;
 }
 
 export async function updatePromptProfile(name: string, payload: PromptProfile): Promise<ProjectDetail> {

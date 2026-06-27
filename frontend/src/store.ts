@@ -9,6 +9,7 @@ import {
   enqueueProjectTask,
   fetchAuthStatus,
   fetchConfig,
+  fetchFirstFramePrompts,
   fetchProject,
   fetchProjects,
   fetchProjectTasks,
@@ -17,6 +18,7 @@ import {
   login,
   logout,
   saveConfig,
+  saveFirstFramePrompts,
   saveShots,
   saveShotRefs,
   updatePromptProfile,
@@ -29,6 +31,7 @@ import type {
   ProjectSummary,
   AssetRef,
   AssetLibraryItem,
+  FirstFramePrompt,
   PromptProfile,
   RemoteProfilePayload,
   ScriptDraftPayload,
@@ -65,6 +68,8 @@ type AppState = {
   applyScriptShots: (shots: Shot[]) => Promise<ProjectDetail>;
   saveAssetRefs: (shotId: string, refs: AssetRef[]) => Promise<AssetLibraryItem[]>;
   removeAsset: (assetId: string) => Promise<AssetLibraryItem[]>;
+  loadFirstFramePrompts: () => Promise<FirstFramePrompt[]>;
+  saveFirstFrameDrafts: (prompts: FirstFramePrompt[]) => Promise<FirstFramePrompt[]>;
   saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
   saveRemoteProfile: (profile: string, payload: RemoteProfilePayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
@@ -255,6 +260,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     const saved = await deleteAsset(activeProject, assetId);
     set({ detail: saved.project, message: "素材已移除" });
     return saved.assets;
+  },
+
+  loadFirstFramePrompts: async () => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    return fetchFirstFramePrompts(activeProject);
+  },
+
+  saveFirstFrameDrafts: async (prompts: FirstFramePrompt[]) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await saveFirstFramePrompts(activeProject, prompts);
+    set({ message: "首帧提示词已保存" });
+    return saved;
   },
 
   saveWorkflowSettings: async (profile: string, payload: WorkflowSettingsPayload) => {

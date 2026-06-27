@@ -41,6 +41,21 @@ export type AssetUploadPayload = {
   text?: string;
 };
 
+export type FirstFramePrompt = {
+  shot_id: string;
+  title: string;
+  duration: number;
+  provider: string;
+  first_frame_path: string;
+  has_first_frame: boolean;
+  prompt: string;
+  negative_prompt: string;
+  generated_prompt: string;
+  generated_negative_prompt: string;
+  saved: boolean;
+  refs: Array<AssetRef & { role_label?: string; usage_label?: string }>;
+};
+
 export type Shot = {
   id: string;
   title: string;

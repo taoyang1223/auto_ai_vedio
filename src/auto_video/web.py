@@ -20,6 +20,7 @@ import yaml
 from .asset_library import delete_library_asset, list_asset_library, upload_library_asset
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
+from .first_frame_prompt import draft_first_frame_prompts, save_first_frame_prompts
 from .models import AssetRef, PromptProfile
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
@@ -261,6 +262,13 @@ def _handler_factory(workspace: Path, *, token: str | None):
             if method == "PUT" and tail == ["shot-refs"]:
                 result = _update_shot_refs(project_root, self._read_json())
                 self._send_json({"ok": True, **result, "assets": list_asset_library(load_project(project_root)), "project": _project_detail(project_root)})
+                return
+            if method == "GET" and tail == ["first-frame-prompts"]:
+                self._send_json({"ok": True, "prompts": draft_first_frame_prompts(load_project(project_root))})
+                return
+            if method == "PUT" and tail == ["first-frame-prompts"]:
+                prompts = save_first_frame_prompts(load_project(project_root), self._read_json())
+                self._send_json({"ok": True, "prompts": prompts})
                 return
             if method == "PUT" and tail == ["prompt-profile"]:
                 result = _update_prompt_profile(project_root, self._read_json())

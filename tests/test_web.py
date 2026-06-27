@@ -383,6 +383,42 @@ def test_web_api_updates_prompt_profile(tmp_path):
     assert project.config.prompt_profile.negative == "identity drift, style drift"
 
 
+def test_web_api_manages_first_frame_prompts(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        drafted = request_json(base_url, "/api/projects/demo/first-frame-prompts")
+        saved = request_json(
+            base_url,
+            "/api/projects/demo/first-frame-prompts",
+            method="PUT",
+            payload={
+                "prompts": [
+                    {
+                        "shot_id": "S01",
+                        "prompt": "custom first frame prompt",
+                        "negative_prompt": "text, watermark",
+                    }
+                ]
+            },
+        )
+        reloaded = request_json(base_url, "/api/projects/demo/first-frame-prompts")
+
+    prompt_file = tmp_path / "demo" / "assets" / "first_frame_prompts.json"
+    prompt_payload = json.loads(prompt_file.read_text(encoding="utf-8"))
+
+    assert drafted["prompts"][0]["shot_id"] == "S01"
+    assert "First-frame key visual" in drafted["prompts"][0]["prompt"]
+    assert saved["prompts"][0]["prompt"] == "custom first frame prompt"
+    assert saved["prompts"][0]["saved"] is True
+    assert reloaded["prompts"][0]["negative_prompt"] == "text, watermark"
+    assert prompt_payload["prompts"][0]["shot_id"] == "S01"
+
+
 def test_web_api_drafts_and_applies_script_storyboard(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(
