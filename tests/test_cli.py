@@ -75,6 +75,12 @@ def test_cli_mock_generate_then_probe(tmp_path: Path):
     assert main(["probe", str(project), "--dry-run"]) == 0
 
 
+def test_cli_probe_strict_fails_when_clips_are_missing(tmp_path: Path):
+    project = tmp_path / "demo"
+    assert main(["init", str(project)]) == 0
+    assert main(["probe", str(project), "--strict"]) == 1
+
+
 def test_checked_in_example_validates():
     assert main(["validate", "examples/demo_project"]) == 0
     assert main(["images", "examples/demo_project", "--dry-run"]) == 0

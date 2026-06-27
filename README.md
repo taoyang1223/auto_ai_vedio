@@ -47,6 +47,7 @@ Before running it on a rented GPU, replace the placeholder PNGs with real first-
 ```bash
 .venv/bin/python -m auto_video validate wan_story
 .venv/bin/python -m auto_video remote run wan_story --profile autodl_5090 --provider comfyui_wan --kind video
+.venv/bin/python -m auto_video probe wan_story --strict
 .venv/bin/python -m auto_video continuity extract-tail-frames wan_story
 .venv/bin/python -m auto_video assemble wan_story
 ```
@@ -68,6 +69,15 @@ Phase 2 routes generation through provider-neutral jobs:
 The mock provider stays offline and deterministic, so tests do not need API keys, network, FFmpeg, or cloud GPU access.
 
 `assemble --dry-run` validates clip readiness and prints the concat-based ffmpeg command. `assemble` writes `renders/final.mp4`, records `renders.final` in `manifest.json`, and fails early if a referenced clip is missing or empty.
+
+`probe` performs media-quality checks after generation. In normal mode it reports per-shot `ok`, `warning`, and `failed` checks for clip existence, video stream readability, resolution, duration, and fps. With `--strict`, the command exits 1 when any shot fails, making it suitable as a batch gate before continuity extraction and final assembly:
+
+```bash
+.venv/bin/python -m auto_video probe demo_project --strict
+.venv/bin/python -m auto_video probe demo_project --strict --blackdetect
+```
+
+`--blackdetect` also runs ffmpeg black-frame detection and flags clips that are almost entirely black. It is optional because it is slower than ffprobe-only checks.
 
 ## External Command Providers
 

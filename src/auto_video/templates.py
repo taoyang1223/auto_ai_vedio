@@ -216,6 +216,7 @@ AutoDL ComfyUI Wan starter project for `auto-video`.
 auto-video validate .
 auto-video remote profiles .
 auto-video remote run . --profile autodl_5090 --provider comfyui_wan --kind video
+auto-video probe . --strict
 auto-video continuity extract-tail-frames .
 auto-video assemble .
 auto-video remote wrapup --host root@<autodl-host> --remote-dir /root/auto-video/jobs/__PROJECT_NAME__ --ssh-option Port=<ssh-port>

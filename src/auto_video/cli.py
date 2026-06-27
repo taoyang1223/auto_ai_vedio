@@ -64,6 +64,12 @@ def build_parser() -> argparse.ArgumentParser:
     probe = sub.add_parser("probe")
     probe.add_argument("project")
     probe.add_argument("--dry-run", action="store_true")
+    probe.add_argument("--strict", action="store_true")
+    probe.add_argument("--ffprobe", default="ffprobe")
+    probe.add_argument("--ffmpeg", default="ffmpeg")
+    probe.add_argument("--min-duration-ratio", type=float, default=0.8)
+    probe.add_argument("--blackdetect", action="store_true")
+    probe.add_argument("--max-black-ratio", type=float, default=0.98)
 
     continuity = sub.add_parser("continuity")
     continuity_sub = continuity.add_subparsers(dest="continuity_command")
@@ -208,9 +214,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "probe":
-            report = probe_project(load_project(args.project), dry_run=args.dry_run)
+            report = probe_project(
+                load_project(args.project),
+                dry_run=args.dry_run,
+                ffprobe=args.ffprobe,
+                ffmpeg=args.ffmpeg,
+                min_duration_ratio=args.min_duration_ratio,
+                blackdetect=args.blackdetect,
+                max_black_ratio=args.max_black_ratio,
+            )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 0
+            return 1 if args.strict and report["summary"]["failed"] > 0 else 0
         if args.command == "continuity" and args.continuity_command == "extract-tail-frames":
             result = extract_tail_frames(load_project(args.project), dry_run=args.dry_run, force=args.force)
             print(json.dumps(result, ensure_ascii=False, indent=2))

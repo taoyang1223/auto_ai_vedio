@@ -20,6 +20,39 @@ class FakeRenderRunner:
             handle.write(b"final-video")
 
 
+class FakeMediaProbeRunner:
+    def __init__(self, payload, blackdetect_stderr=""):
+        self.payload = payload
+        self.blackdetect_stderr = blackdetect_stderr
+        self.probed = []
+        self.blackdetected = []
+
+    def probe(self, path):
+        self.probed.append(path)
+        return self.payload
+
+    def blackdetect(self, path):
+        self.blackdetected.append(path)
+        return self.blackdetect_stderr
+
+
+def _ffprobe_payload(*, width=1080, height=1920, duration=5.0, fps="30/1"):
+    return {
+        "streams": [
+            {
+                "codec_type": "video",
+                "codec_name": "h264",
+                "width": width,
+                "height": height,
+                "duration": str(duration),
+                "avg_frame_rate": fps,
+                "pix_fmt": "yuv420p",
+            }
+        ],
+        "format": {"duration": str(duration), "bit_rate": "1000000"},
+    }
+
+
 def test_render_plan_uses_manifest_clip(demo_project_files):
     project = load_project(demo_project_files)
     generate_videos(project, provider_name="mock", dry_run=False)
@@ -96,3 +129,58 @@ def test_probe_reports_missing_or_mock_duration(demo_project_files):
     assert report["dry_run"] is True
     assert report["shots"][0]["id"] == "S01"
     assert report["shots"][0]["manifest_duration"] == 5.0
+
+
+def test_probe_reports_media_quality_ok(demo_project_files):
+    project = load_project(demo_project_files)
+    generate_videos(project, provider_name="mock", dry_run=False)
+    project = load_project(demo_project_files)
+    runner = FakeMediaProbeRunner(_ffprobe_payload())
+
+    report = probe_project(project, runner=runner)
+
+    assert report["summary"]["ok"] == 1
+    assert report["summary"]["failed"] == 0
+    assert report["shots"][0]["quality_status"] == "ok"
+    assert report["shots"][0]["media"]["width"] == 1080
+    assert [check["name"] for check in report["shots"][0]["checks"]] == [
+        "clip_ready",
+        "media_resolution",
+        "media_duration",
+        "media_fps",
+    ]
+    assert runner.probed
+
+
+def test_probe_flags_bad_media_quality(demo_project_files):
+    project = load_project(demo_project_files)
+    generate_videos(project, provider_name="mock", dry_run=False)
+    project = load_project(demo_project_files)
+    runner = FakeMediaProbeRunner(_ffprobe_payload(width=640, height=480, duration=1.0, fps="24/1"))
+
+    report = probe_project(project, runner=runner)
+
+    checks = {check["name"]: check for check in report["shots"][0]["checks"]}
+    assert report["summary"]["failed"] == 1
+    assert report["shots"][0]["quality_status"] == "failed"
+    assert checks["media_resolution"]["status"] == "failed"
+    assert checks["media_duration"]["status"] == "failed"
+    assert checks["media_fps"]["status"] == "failed"
+
+
+def test_probe_can_run_blackdetect_check(demo_project_files):
+    project = load_project(demo_project_files)
+    generate_videos(project, provider_name="mock", dry_run=False)
+    project = load_project(demo_project_files)
+    runner = FakeMediaProbeRunner(
+        _ffprobe_payload(duration=5.0),
+        blackdetect_stderr="[blackdetect @ 0x1] black_start:0 black_end:4.95 black_duration:4.95\n",
+    )
+
+    report = probe_project(project, runner=runner, blackdetect=True, max_black_ratio=0.9)
+
+    blackdetect_check = report["shots"][0]["checks"][-1]
+    assert blackdetect_check["name"] == "blackdetect"
+    assert blackdetect_check["status"] == "failed"
+    assert blackdetect_check["black_ratio"] == 0.99
+    assert runner.blackdetected
