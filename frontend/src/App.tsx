@@ -1069,6 +1069,7 @@ function NovelChapterPanel() {
                   <span className="rounded-md bg-teal-50 px-2 py-1 text-xs text-teal-700">{genderLabel(character.gender)}</span>
                 </div>
                 <div className="mt-2 text-xs leading-5 text-slate-500">{character.visual_profile}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">{character.wardrobe_profile}</div>
                 <div className="mt-2 flex items-center gap-2 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">
                   <Mic2 size={13} />
                   <span className="truncate">{character.voice}</span>
@@ -1082,6 +1083,7 @@ function NovelChapterPanel() {
               <div key={scene.id} className="rounded-lg border border-slate-200 bg-white p-3">
                 <div className="font-semibold text-slate-950">{scene.name}</div>
                 <div className="mt-2 text-xs leading-5 text-slate-500">{scene.style_prompt}</div>
+                <div className="mt-2 text-xs leading-5 text-slate-500">{scene.wardrobe_prompt}</div>
                 <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600">{scene.lighting}</div>
               </div>
             ))}
@@ -1112,6 +1114,7 @@ function NovelChapterPanel() {
                       <span className="rounded-md bg-slate-50 px-2 py-1">音色：{shot.voice || "默认"}</span>
                     </div>
                     <div className="rounded-md bg-slate-50 px-2 py-1 text-xs">场景：{shot.scene || "默认场景"}</div>
+                    {shot.wardrobe ? <div className="rounded-md bg-teal-50 px-2 py-1 text-xs text-teal-700">服装：{shot.wardrobe}</div> : null}
                   </div>
                 </div>
               ))}
@@ -2236,6 +2239,7 @@ function buildPromptPreview(profile: PromptProfile, shot: Shot) {
   return [
     ...profileLines,
     shot.visual_prompt,
+    `Wardrobe: ${shot.wardrobe || ""}`,
     `Performance: ${shot.performance}`,
     `Camera: ${shot.camera_motion}`,
     `Environment motion: ${shot.environment_motion}`,
@@ -2376,6 +2380,7 @@ function SortableShotCard({
           </div>
         </div>
         <LabeledTextarea label="画面提示词" value={shot.visual_prompt} onChange={(value) => updateShot(index, { visual_prompt: value })} />
+        <LabeledTextarea label="服装与场景对应" rows={3} value={shot.wardrobe || ""} onChange={(value) => updateShot(index, { wardrobe: value })} />
         <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
           <LabeledInput label="镜头运动" value={shot.camera_motion} onChange={(value) => updateShot(index, { camera_motion: value })} />
           <LabeledInput label="环境运动" value={shot.environment_motion} onChange={(value) => updateShot(index, { environment_motion: value })} />

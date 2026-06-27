@@ -173,6 +173,7 @@ def _shot_plan(raw: dict[str, Any]) -> ShotPlan:
         scene=str(raw.get("scene", "")),
         speaker=str(raw.get("speaker", "")),
         voice=str(raw.get("voice", "")),
+        wardrobe=str(raw.get("wardrobe", "")),
         visual_prompt=str(raw.get("visual_prompt", "")),
         camera_motion=str(raw.get("camera_motion", "")),
         environment_motion=str(raw.get("environment_motion", "")),

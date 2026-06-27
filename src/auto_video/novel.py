@@ -206,7 +206,7 @@ def _merge_characters(existing: list[dict[str, Any]], text: str) -> list[dict[st
             continue
         gender = _infer_gender(name, text)
         by_name[name] = _character_payload(name, len(by_name), gender=gender)
-    return list(by_name.values())
+    return [_normalize_character(item, index) for index, item in enumerate(by_name.values())]
 
 
 def _candidate_names(text: str) -> list[str]:
@@ -255,17 +255,52 @@ def _character_payload(name: str, index: int, *, gender: str, character_id: str 
         "name": name,
         "gender": gender,
         "visual_profile": _visual_profile(name, index, gender),
+        "wardrobe_profile": _wardrobe_profile(name, index, gender),
         "voice": voice_pool[index % len(voice_pool)],
         "voice_profile": _voice_profile(index, gender),
         "aliases": [name],
     }
 
 
+def _normalize_character(item: dict[str, Any], index: int) -> dict[str, Any]:
+    name = str(item.get("name") or f"角色{index + 1}")
+    gender = str(item.get("gender") or "neutral")
+    defaults = _character_payload(
+        name,
+        index,
+        gender=gender,
+        character_id=str(item.get("id") or "") or None,
+    )
+    merged = {**defaults, **item}
+    for key, value in defaults.items():
+        if not merged.get(key):
+            merged[key] = value
+    if not isinstance(merged.get("aliases"), list):
+        merged["aliases"] = [name]
+    return merged
+
+
 def _visual_profile(name: str, index: int, gender: str) -> str:
     palettes = ("墨青", "银灰", "深红", "月白", "黛蓝", "松绿", "金棕", "紫黑")
     builds = ("清瘦", "挺拔", "沉稳", "敏捷", "温和", "冷峻")
     hair = "长发" if gender == "female" else "短发" if gender == "male" else "自然发型"
-    return f"{name}：{builds[index % len(builds)]}体态，{hair}，{palettes[index % len(palettes)]}色系服装，五官和服饰在所有章节保持一致"
+    return f"{name}：{builds[index % len(builds)]}体态，{hair}，{palettes[index % len(palettes)]}识别色，五官、发型和体态在所有章节保持一致"
+
+
+def _wardrobe_profile(name: str, index: int, gender: str) -> str:
+    palettes = ("墨青", "银灰", "深红", "月白", "黛蓝", "松绿", "金棕", "紫黑")
+    silhouettes = {
+        "female": ("修身长衫", "轻便披帛", "窄袖劲装"),
+        "male": ("利落短袍", "束腰长衣", "窄袖外袍"),
+        "neutral": ("简洁常服", "低调外袍", "素色披风"),
+    }
+    props = ("银色发簪", "旧皮护腕", "细绳腰封", "暗纹衣领", "小型随身包", "磨旧披肩")
+    pool = silhouettes.get(gender, silhouettes["neutral"])
+    return (
+        f"{name}基础服装：{palettes[index % len(palettes)]}主识别色，"
+        f"{pool[index % len(pool)]}轮廓，固定识别物为{props[index % len(props)]}；"
+        "后续可按场景增减雨具、斗篷、礼服或护具，但必须保留主识别色、轮廓和识别物"
+    )
 
 
 def _voice_profile(index: int, gender: str) -> str:
@@ -277,10 +312,10 @@ def _merge_scenes(existing: list[dict[str, Any]], text: str) -> list[dict[str, A
     by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
     for name in _candidate_scenes(text):
         if name not in by_name:
-            by_name[name] = _scene_payload(name, len(by_name))
+            by_name[name] = _scene_payload(name, len(by_name), context=_near_text(name, text))
     if not by_name:
-        by_name["本章主要场景"] = _scene_payload("本章主要场景", 0)
-    return list(by_name.values())
+        by_name["本章主要场景"] = _scene_payload("本章主要场景", 0, context=text[:220])
+    return [_normalize_scene(item, index) for index, item in enumerate(by_name.values())]
 
 
 def _candidate_scenes(text: str) -> list[str]:
@@ -293,15 +328,44 @@ def _candidate_scenes(text: str) -> list[str]:
     return candidates[:16]
 
 
-def _scene_payload(name: str, index: int) -> dict[str, Any]:
+def _scene_payload(name: str, index: int, *, context: str = "") -> dict[str, Any]:
     moods = ("冷色月光", "暖色烛火", "晨雾微光", "雨夜反光", "尘埃逆光", "幽暗高反差")
+    mood = moods[index % len(moods)]
     return {
         "id": _safe_id("scene", name),
         "name": name,
-        "style_prompt": f"{name}，{moods[index % len(moods)]}，空间结构、材质、色调在后续章节保持一致",
-        "lighting": moods[index % len(moods)],
+        "style_prompt": f"{name}，{mood}，空间结构、材质、色调在后续章节保持一致",
+        "lighting": mood,
         "continuity": "same geography, same props placement, same atmosphere and color palette",
+        "wardrobe_prompt": _scene_wardrobe_prompt(name, mood, context),
     }
+
+
+def _normalize_scene(item: dict[str, Any], index: int) -> dict[str, Any]:
+    name = str(item.get("name") or f"场景{index + 1}")
+    defaults = _scene_payload(name, index)
+    merged = {**defaults, **item}
+    for key, value in defaults.items():
+        if not merged.get(key):
+            merged[key] = value
+    return merged
+
+
+def _scene_wardrobe_prompt(name: str, mood: str, context: str) -> str:
+    combined = f"{name} {context} {mood}"
+    if re.search(r"雨|湿|水|河|江|湖|巷|夜", combined):
+        return "雨夜/潮湿场景服装：外层披风或雨披，深色耐脏材质，衣摆和肩部有轻微湿痕，保留角色主识别色与固定识别物"
+    if re.search(r"雪|寒|冰|冬|霜", combined):
+        return "寒冷场景服装：厚披风、毛边领口或保暖内衬，色彩压低但保留角色主识别色与固定识别物"
+    if re.search(r"战|阵|军|营|城墙|兵|血", combined):
+        return "战斗场景服装：轻甲、护腕、束紧衣摆和便于行动的靴具，服装有战损但保留角色主识别色与固定识别物"
+    if re.search(r"宫|殿|宴|厅|府|堂", combined):
+        return "正式室内场景服装：更整洁的外袍或礼服层次，材质更精致，保留角色主识别色、剪裁轮廓和固定识别物"
+    if re.search(r"客栈|屋|房|室|楼|阁|铺", combined):
+        return "日常室内场景服装：干净常服或轻外袍，行动自然，服装层次适中，保留角色主识别色和固定识别物"
+    if re.search(r"山|林|谷|野|路|荒|沙|尘", combined):
+        return "野外行进场景服装：便于行动的短披风、护腕、束口裤靴，带少量尘土，保留角色主识别色与固定识别物"
+    return "通用场景服装：根据空间温度、身份和行动需求调整外层服饰，保留角色主识别色、剪裁轮廓和固定识别物"
 
 
 def _beats_for_count(text: str, count: int) -> list[str]:
@@ -343,6 +407,7 @@ def _shot_payload(
     visible = _visible_characters(beat, characters, speaker)
     character_lines = [str(item.get("visual_profile") or item.get("name")) for item in visible]
     scene_line = str(scene.get("style_prompt") or scene.get("name"))
+    wardrobe_line = "；".join(_wardrobe_for_scene(item, scene) for item in visible)
     dialogue_cue = "口型与配音台词同步，表情随语气变化" if speaker.get("id") != NARRATOR_ID else "人物动作与旁白节奏同步，场景细节跟随叙事变化"
     return {
         "id": f"S{index + 1:03d}",
@@ -354,10 +419,11 @@ def _shot_payload(
         "scene": str(scene.get("id") or ""),
         "speaker": str(speaker.get("id") or NARRATOR_ID),
         "voice": str(speaker.get("voice") or NEUTRAL_VOICES[0]),
+        "wardrobe": wardrobe_line,
         "visual_prompt": (
             f"原创小说章节镜头，{project.config.aspect_ratio}，场景：{scene_line}。"
-            f"人物：{'；'.join(character_lines)}。剧情：{beat}。"
-            "电影感叙事画面，角色外形严格一致，场景风格严格一致，动作自然连贯"
+            f"人物：{'；'.join(character_lines)}。服装：{wardrobe_line}。剧情：{beat}。"
+            "电影感叙事画面，角色外形严格一致，服装必须与当前场景、天气和身份状态对应，场景风格严格一致，动作自然连贯"
         ),
         "camera_motion": _camera_for_index(index, total),
         "environment_motion": f"{scene.get('name')}内的光影、风、尘埃或道具随旁白节奏轻微运动",
@@ -368,6 +434,14 @@ def _shot_payload(
         "negative_prompt": BASE_NEGATIVE,
         "refs": _refs_for_shot(visible, scene),
     }
+
+
+def _wardrobe_for_scene(character: dict[str, Any], scene: dict[str, Any]) -> str:
+    name = str(character.get("name") or "角色")
+    base = str(character.get("wardrobe_profile") or character.get("visual_profile") or name)
+    scene_rule = str(scene.get("wardrobe_prompt") or "根据当前场景调整外层服饰")
+    scene_name = str(scene.get("name") or "当前场景")
+    return f"{name}：{base}；{scene_name}穿搭规则：{scene_rule}"
 
 
 def _speaker_for_beat(beat: str, characters: list[dict[str, Any]]) -> dict[str, Any]:
@@ -454,6 +528,7 @@ def _write_identity_assets(root: Path, novel: dict[str, Any]) -> None:
                     f"name: {character.get('name')}",
                     f"gender: {character.get('gender')}",
                     f"visual_profile: {character.get('visual_profile')}",
+                    f"wardrobe_profile: {character.get('wardrobe_profile')}",
                     f"aliases: {', '.join(character.get('aliases', [])) if isinstance(character.get('aliases'), list) else ''}",
                 ]
             ),
@@ -480,6 +555,7 @@ def _write_identity_assets(root: Path, novel: dict[str, Any]) -> None:
                     f"style_prompt: {scene.get('style_prompt')}",
                     f"lighting: {scene.get('lighting')}",
                     f"continuity: {scene.get('continuity')}",
+                    f"wardrobe_prompt: {scene.get('wardrobe_prompt')}",
                 ]
             ),
         )

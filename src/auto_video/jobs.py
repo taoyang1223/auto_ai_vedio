@@ -89,6 +89,7 @@ class ProviderControls:
     scene: str = ""
     speaker: str = ""
     voice: str = ""
+    wardrobe: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ProviderControls":
@@ -98,6 +99,7 @@ class ProviderControls:
             scene=str(data.get("scene", "")),
             speaker=str(data.get("speaker", "")),
             voice=str(data.get("voice", "")),
+            wardrobe=str(data.get("wardrobe", "")),
             camera_motion=str(data.get("camera_motion", "")),
             environment_motion=str(data.get("environment_motion", "")),
             performance=str(data.get("performance", "")),

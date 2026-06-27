@@ -66,6 +66,7 @@ export type Shot = {
   scene?: string;
   speaker?: string;
   voice?: string;
+  wardrobe?: string;
   visual_prompt: string;
   camera_motion: string;
   environment_motion: string;
@@ -160,6 +161,7 @@ export type NovelCharacter = {
   name: string;
   gender: string;
   visual_profile: string;
+  wardrobe_profile: string;
   voice: string;
   voice_profile: string;
   aliases?: string[];
@@ -171,6 +173,7 @@ export type NovelScene = {
   style_prompt: string;
   lighting: string;
   continuity: string;
+  wardrobe_prompt: string;
 };
 
 export type NovelChapter = {

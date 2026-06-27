@@ -145,6 +145,7 @@ class ShotPlan:
     scene: str = ""
     speaker: str = ""
     voice: str = ""
+    wardrobe: str = ""
     camera_motion: str = ""
     environment_motion: str = ""
     performance: str = ""

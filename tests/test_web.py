@@ -623,6 +623,7 @@ def test_web_api_drafts_and_applies_novel_chapter(tmp_path):
     assert applied["project"]["shots_detail"][0]["voice"]
     assert applied["project"]["shots_detail"][0]["speaker"]
     assert applied["project"]["shots_detail"][0]["scene"]
+    assert applied["project"]["shots_detail"][0]["wardrobe"]
     assert project.shots[0].voice == applied["project"]["shots_detail"][0]["voice"]
     assert novel["chapters"][0]["title"] == "雨夜客栈"
 

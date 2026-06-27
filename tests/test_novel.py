@@ -31,6 +31,7 @@ def test_novel_chapter_draft_tracks_20_minute_character_scene_and_voice(demo_pro
     names = {item["name"] for item in draft["characters"]}
     scene_names = {item["name"] for item in draft["scenes"]}
     voices = {item["voice"] for item in draft["characters"] if item["name"] in {"林舟", "苏眠"}}
+    inn_scene = next(item for item in draft["scenes"] if "青石客栈" in item["name"])
 
     assert draft["meta"]["target_minutes"] == 20
     assert draft["meta"]["shot_count"] == 100
@@ -38,10 +39,14 @@ def test_novel_chapter_draft_tracks_20_minute_character_scene_and_voice(demo_pro
     assert {"旁白", "林舟", "苏眠"}.issubset(names)
     assert any("青石客栈" in name for name in scene_names)
     assert len(voices) == 2
+    assert all(item["wardrobe_profile"] for item in draft["characters"])
+    assert "雨夜" in inn_scene["wardrobe_prompt"]
     assert draft["shots"][0]["speaker"]
     assert draft["shots"][0]["voice"]
     assert draft["shots"][0]["scene"]
     assert draft["shots"][0]["characters"]
+    assert "穿搭规则" in draft["shots"][0]["wardrobe"]
+    assert "服装" in draft["shots"][0]["visual_prompt"]
 
 
 def test_apply_novel_chapter_writes_identity_assets_and_job_metadata(demo_project_files):
@@ -69,15 +74,21 @@ def test_apply_novel_chapter_writes_identity_assets_and_job_metadata(demo_projec
     assert first_shot.voice
     assert first_shot.scene
     assert first_shot.characters
+    assert first_shot.wardrobe
     assert any(ref.role == "voice_reference" and ref.usage == "preserve_voice" for ref in first_shot.refs)
     assert jobs[0].metadata["speaker"] == first_shot.speaker
     assert jobs[0].metadata["voice"] == first_shot.voice
 
     for character in store["characters"]:
-        assert (demo_project_files / "assets" / "novel" / "characters" / f"{character['id']}.txt").exists()
+        character_asset = demo_project_files / "assets" / "novel" / "characters" / f"{character['id']}.txt"
+        assert character_asset.exists()
+        assert "wardrobe_profile" in character_asset.read_text(encoding="utf-8")
         assert (demo_project_files / "assets" / "novel" / "voices" / f"{character['id']}.txt").exists()
     for scene in store["scenes"]:
-        assert (demo_project_files / "assets" / "novel" / "scenes" / f"{scene['id']}.txt").exists()
+        scene_asset = demo_project_files / "assets" / "novel" / "scenes" / f"{scene['id']}.txt"
+        assert scene_asset.exists()
+        assert "wardrobe_prompt" in scene_asset.read_text(encoding="utf-8")
 
     saved = json.loads((demo_project_files / "shots.json").read_text(encoding="utf-8"))
     assert saved["shots"][0]["voice"] == first_shot.voice
+    assert saved["shots"][0]["wardrobe"] == first_shot.wardrobe

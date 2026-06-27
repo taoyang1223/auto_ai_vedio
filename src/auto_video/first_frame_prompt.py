@@ -125,6 +125,7 @@ def _generated_prompt(project: Project, shot: ShotPlan) -> str:
         _line("Characters in frame", ", ".join(shot.characters)),
         _line("Scene continuity key", shot.scene),
         _line("Speaker", shot.speaker),
+        _line("Wardrobe continuity", shot.wardrobe),
         _line("Shot visual intent", shot.visual_prompt),
         _line("Opening performance state", shot.performance),
         _line("Camera composition", shot.camera_motion),

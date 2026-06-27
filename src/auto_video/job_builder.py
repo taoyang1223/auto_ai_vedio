@@ -90,6 +90,7 @@ def _controls(project: Project, shot: ShotPlan) -> ProviderControls:
         scene=shot.scene,
         speaker=shot.speaker,
         voice=shot.voice,
+        wardrobe=shot.wardrobe,
     )
 
 
@@ -127,6 +128,7 @@ def build_jobs(
             voice=shot.voice,
             scene=shot.scene,
             characters=shot.characters,
+            wardrobe=shot.wardrobe,
         )
         jobs.append(
             GenerationJob(
@@ -164,6 +166,7 @@ def _job_metadata(
     voice: str = "",
     scene: str = "",
     characters: tuple[str, ...] = (),
+    wardrobe: str = "",
 ) -> dict[str, str]:
     payload = {
         "kind": kind,
@@ -176,6 +179,7 @@ def _job_metadata(
         "voice": voice,
         "scene": scene,
         "characters": list(characters),
+        "wardrobe": wardrobe,
         "refs": [
             {
                 "path": ref.path,
@@ -192,6 +196,7 @@ def _job_metadata(
         "speaker": speaker,
         "voice": voice,
         "scene": scene,
+        "wardrobe": wardrobe,
     }.items():
         if value:
             metadata[key] = value
