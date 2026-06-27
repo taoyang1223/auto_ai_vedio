@@ -3,6 +3,7 @@ import {
   applyScriptStoryboard,
   cancelTask,
   createProject,
+  deleteAsset,
   deleteProject,
   draftScriptStoryboard,
   enqueueProjectTask,
@@ -17,6 +18,7 @@ import {
   logout,
   saveConfig,
   saveShots,
+  saveShotRefs,
   updatePromptProfile,
   updateRemoteProfile,
   updateWorkflowSettings,
@@ -25,6 +27,8 @@ import {
 import type {
   ProjectDetail,
   ProjectSummary,
+  AssetRef,
+  AssetLibraryItem,
   PromptProfile,
   RemoteProfilePayload,
   ScriptDraftPayload,
@@ -59,6 +63,8 @@ type AppState = {
   savePromptProfile: (payload: PromptProfile) => Promise<ProjectDetail>;
   draftScriptShots: (payload: ScriptDraftPayload) => Promise<ScriptDraftResult>;
   applyScriptShots: (shots: Shot[]) => Promise<ProjectDetail>;
+  saveAssetRefs: (shotId: string, refs: AssetRef[]) => Promise<AssetLibraryItem[]>;
+  removeAsset: (assetId: string) => Promise<AssetLibraryItem[]>;
   saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
   saveRemoteProfile: (profile: string, payload: RemoteProfilePayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
@@ -233,6 +239,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ detail: saved, message: "脚本分镜已应用" });
     await get().refreshProjects();
     return saved;
+  },
+
+  saveAssetRefs: async (shotId: string, refs: AssetRef[]) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await saveShotRefs(activeProject, shotId, refs);
+    set({ detail: saved.project, message: "分镜素材引用已保存" });
+    return saved.assets;
+  },
+
+  removeAsset: async (assetId: string) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await deleteAsset(activeProject, assetId);
+    set({ detail: saved.project, message: "素材已移除" });
+    return saved.assets;
   },
 
   saveWorkflowSettings: async (profile: string, payload: WorkflowSettingsPayload) => {

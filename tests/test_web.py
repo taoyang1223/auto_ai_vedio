@@ -424,6 +424,58 @@ def test_web_api_drafts_and_applies_script_storyboard(tmp_path):
     assert manifest["renders"] == {}
 
 
+def test_web_api_manages_asset_library_and_shot_refs(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        uploaded = request_json(
+            base_url,
+            "/api/projects/demo/assets",
+            method="POST",
+            payload={
+                "label": "主角参考",
+                "type": "image",
+                "role": "style_reference",
+                "usage": "preserve_subject",
+                "filename": "hero.png",
+                "data_base64": base64.b64encode(b"fake-image").decode("ascii"),
+            },
+        )
+        asset = uploaded["asset"]
+        listed = request_json(base_url, "/api/projects/demo/assets")
+        bound = request_json(
+            base_url,
+            "/api/projects/demo/shot-refs",
+            method="PUT",
+            payload={
+                "shot_id": "S01",
+                "refs": [
+                    {
+                        "path": asset["path"],
+                        "type": asset["type"],
+                        "role": asset["role"],
+                        "usage": asset["usage"],
+                    }
+                ],
+            },
+        )
+        deleted = request_json(base_url, f"/api/projects/demo/assets/{asset['id']}", method="DELETE")
+
+    project = load_project(tmp_path / "demo")
+    asset_file = tmp_path / "demo" / asset["path"]
+
+    assert listed["assets"]
+    assert bound["project"]["shots_detail"][0]["refs"][0]["path"] == asset["path"]
+    assert bound["assets"][0]["bound_shots"] or any("S01" in item["bound_shots"] for item in bound["assets"])
+    assert deleted["deleted"] == asset["id"]
+    assert project.shots[0].refs == ()
+    assert not asset_file.exists()
+
+
 def test_web_serves_project_media(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

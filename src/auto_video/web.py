@@ -17,9 +17,10 @@ from urllib.parse import unquote, urlparse
 
 import yaml
 
+from .asset_library import delete_library_asset, list_asset_library, upload_library_asset
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
-from .models import PromptProfile
+from .models import AssetRef, PromptProfile
 from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
@@ -244,6 +245,22 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 payload = self._read_json()
                 _write_shots(project_root, payload.get("shots"))
                 self._send_json({"ok": True, "project": _project_detail(project_root)})
+                return
+            if method == "GET" and tail == ["assets"]:
+                self._send_json({"ok": True, "assets": list_asset_library(load_project(project_root))})
+                return
+            if method == "POST" and tail == ["assets"]:
+                asset = upload_library_asset(project_root, self._read_json())
+                self._send_json({"ok": True, "asset": asset, "assets": list_asset_library(load_project(project_root))})
+                return
+            if method == "DELETE" and len(tail) == 2 and tail[0] == "assets":
+                result = delete_library_asset(load_project(project_root), tail[1])
+                _remove_asset_refs(project_root, str(result.get("path") or ""))
+                self._send_json({"ok": True, **result, "assets": list_asset_library(load_project(project_root)), "project": _project_detail(project_root)})
+                return
+            if method == "PUT" and tail == ["shot-refs"]:
+                result = _update_shot_refs(project_root, self._read_json())
+                self._send_json({"ok": True, **result, "assets": list_asset_library(load_project(project_root)), "project": _project_detail(project_root)})
                 return
             if method == "PUT" and tail == ["prompt-profile"]:
                 result = _update_prompt_profile(project_root, self._read_json())
@@ -1021,6 +1038,72 @@ def _write_shots(root: Path, shots: Any) -> None:
     except Exception:
         path.write_text(old, encoding="utf-8")
         raise
+
+
+def _update_shot_refs(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    shot_id = str(payload.get("shot_id") or "").strip()
+    if not shot_id:
+        raise ConfigError("shot_id is required", fix="请选择要绑定素材的分镜。")
+    refs = _sanitize_refs(payload.get("refs"))
+    shots_path = root / "shots.json"
+    data = json.loads(shots_path.read_text(encoding="utf-8"))
+    shots = data.get("shots")
+    if not isinstance(shots, list):
+        raise ConfigError("shots.json must contain shots", fix="Restore a valid shots.json.")
+    for shot in shots:
+        if str(shot.get("id")) != shot_id:
+            continue
+        shot["refs"] = refs
+        _write_shots(root, shots)
+        return {"shot_id": shot_id, "refs": refs}
+    raise ConfigError(f"shot {shot_id} not found", fix="Refresh the project and choose an existing shot.")
+
+
+def _sanitize_refs(raw_refs: Any) -> list[dict[str, str]]:
+    if raw_refs is None:
+        return []
+    if not isinstance(raw_refs, list):
+        raise ConfigError("refs must be a list", fix="请提交素材引用数组。")
+    clean_refs: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for raw in raw_refs:
+        if not isinstance(raw, dict):
+            raise ConfigError("ref must be an object", fix="每个素材引用都需要 path/type/role/usage。")
+        clean = {
+            "path": str(raw.get("path") or "").strip(),
+            "type": str(raw.get("type") or "").strip(),
+            "role": str(raw.get("role") or "").strip(),
+            "usage": str(raw.get("usage") or "").strip(),
+        }
+        if not clean["path"]:
+            raise ConfigError("ref path is required", fix="素材引用缺少路径。")
+        AssetRef(**clean)
+        if clean["path"] in seen_paths:
+            continue
+        seen_paths.add(clean["path"])
+        clean_refs.append(clean)
+    return clean_refs
+
+
+def _remove_asset_refs(root: Path, relative_path: str) -> None:
+    if not relative_path:
+        return
+    shots_path = root / "shots.json"
+    data = json.loads(shots_path.read_text(encoding="utf-8"))
+    shots = data.get("shots")
+    if not isinstance(shots, list):
+        return
+    changed = False
+    for shot in shots:
+        refs = shot.get("refs")
+        if not isinstance(refs, list):
+            continue
+        next_refs = [ref for ref in refs if not (isinstance(ref, dict) and ref.get("path") == relative_path)]
+        if len(next_refs) != len(refs):
+            shot["refs"] = next_refs
+            changed = True
+    if changed:
+        _write_shots(root, shots)
 
 
 def _apply_script_storyboard(root: Path, payload: dict[str, Any]) -> dict[str, Any]:

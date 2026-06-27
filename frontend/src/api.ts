@@ -1,6 +1,9 @@
 import axios from "axios";
 import type {
   ApiEnvelope,
+  AssetLibraryItem,
+  AssetRef,
+  AssetUploadPayload,
   ComfyCheck,
   PromptProfile,
   ProjectDetail,
@@ -80,6 +83,31 @@ export async function saveConfig(name: string, text: string): Promise<ProjectDet
 export async function saveShots(name: string, shots: unknown[]): Promise<ProjectDetail> {
   const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(`/api/projects/${encodeURIComponent(name)}/shots`, { shots });
   return data.project;
+}
+
+export async function fetchAssets(name: string): Promise<AssetLibraryItem[]> {
+  const { data } = await client.get<ApiEnvelope<{ assets: AssetLibraryItem[] }>>(`/api/projects/${encodeURIComponent(name)}/assets`);
+  return data.assets;
+}
+
+export async function uploadAsset(name: string, payload: AssetUploadPayload): Promise<AssetLibraryItem[]> {
+  const { data } = await client.post<ApiEnvelope<{ assets: AssetLibraryItem[] }>>(`/api/projects/${encodeURIComponent(name)}/assets`, payload);
+  return data.assets;
+}
+
+export async function saveShotRefs(name: string, shotId: string, refs: AssetRef[]): Promise<{ project: ProjectDetail; assets: AssetLibraryItem[] }> {
+  const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail; assets: AssetLibraryItem[] }>>(
+    `/api/projects/${encodeURIComponent(name)}/shot-refs`,
+    { shot_id: shotId, refs }
+  );
+  return { project: data.project, assets: data.assets };
+}
+
+export async function deleteAsset(name: string, assetId: string): Promise<{ project: ProjectDetail; assets: AssetLibraryItem[] }> {
+  const { data } = await client.delete<ApiEnvelope<{ project: ProjectDetail; assets: AssetLibraryItem[] }>>(
+    `/api/projects/${encodeURIComponent(name)}/assets/${encodeURIComponent(assetId)}`
+  );
+  return { project: data.project, assets: data.assets };
 }
 
 export async function updatePromptProfile(name: string, payload: PromptProfile): Promise<ProjectDetail> {

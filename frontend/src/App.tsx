@@ -47,24 +47,27 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { checkComfyWorkflow } from "./api";
+import { checkComfyWorkflow, fetchAssets, uploadAsset } from "./api";
 import { useAppStore } from "./store";
 import type {
+  AssetLibraryItem,
+  AssetRef,
   ComfyCheck,
   ProjectDetail,
   PromptProfile,
   ScriptDraftResult,
-  RemoteProfileSummary,
   Shot,
+  RemoteProfileSummary,
   WebTask,
   WebTaskStatus,
   WorkflowSummary
 } from "./types";
 
-type TabKey = "script" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
+type TabKey = "script" | "assets" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
   { key: "script", label: "脚本拆镜", icon: Sparkles },
+  { key: "assets", label: "素材库", icon: ImagePlus },
   { key: "shots", label: "分镜编排", icon: Clapperboard },
   { key: "prompt", label: "提示词", icon: Wand2 },
   { key: "review", label: "成片审看", icon: Eye },
@@ -431,6 +434,7 @@ function ProjectConsole() {
       </nav>
 
       {tab === "script" ? <ScriptStoryboardPanel /> : null}
+      {tab === "assets" ? <AssetLibraryPanel /> : null}
       {tab === "shots" ? <ShotsPanel /> : null}
       {tab === "prompt" ? <PromptProfilePanel /> : null}
       {tab === "review" ? <ReviewPanel /> : null}
@@ -563,7 +567,7 @@ function ProductionStatus({
 }) {
   const steps = productionSteps(detail, tasks);
   return (
-    <section className="grid grid-cols-6 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
+    <section className="grid grid-cols-7 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
       {steps.map((step) => {
         const Icon = step.icon;
         return (
@@ -594,6 +598,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const totalShots = detail.shots_detail.length;
   const readyShots = detail.shots_detail.filter((shot) => shot.visual_prompt.trim() && Number(shot.duration) > 0).length;
   const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
+  const staticRefs = detail.shots_detail.reduce((count, shot) => count + shot.refs.length, 0);
   const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
   const profileFilled = Object.values(detail.prompt_profile || {}).filter((value) => String(value || "").trim()).length;
   const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
@@ -615,6 +620,14 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       metric: `${firstFrames}/${totalShots} 已关联`,
       status: totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
       tab: "shots",
+      icon: ImagePlus
+    },
+    {
+      key: "assets",
+      label: "素材引用",
+      metric: staticRefs ? `${staticRefs} 个引用` : "未绑定",
+      status: staticRefs ? "done" : "pending",
+      tab: "assets",
       icon: ImagePlus
     },
     {
@@ -827,6 +840,366 @@ function defaultScriptFromProject(detail: ProjectDetail) {
     .map((shot) => shot.subtitle || shot.intent || shot.visual_prompt)
     .filter(Boolean)
     .join("。");
+}
+
+const assetTypeOptions = [
+  { value: "image", label: "图片" },
+  { value: "video", label: "视频" },
+  { value: "audio", label: "音频" },
+  { value: "text", label: "文本" }
+];
+
+const assetRoleOptions = [
+  { value: "first_frame", label: "首帧" },
+  { value: "last_frame", label: "尾帧" },
+  { value: "style_reference", label: "风格" },
+  { value: "camera_reference", label: "镜头" },
+  { value: "motion_reference", label: "动作" },
+  { value: "environment_reference", label: "场景" },
+  { value: "voice_reference", label: "声音" },
+  { value: "bgm_reference", label: "配乐" }
+];
+
+const assetUsageOptions = [
+  { value: "preserve_subject", label: "保持主体" },
+  { value: "extract_style", label: "提取风格" },
+  { value: "extract_camera_motion", label: "提取镜头" },
+  { value: "extract_action", label: "提取动作" },
+  { value: "provide_context", label: "提供上下文" },
+  { value: "preserve_voice", label: "保持声音" },
+  { value: "extract_audio_rhythm", label: "提取节奏" }
+];
+
+function AssetLibraryPanel() {
+  const { detail, removeAsset, saveAssetRefs, setMessage } = useAppStore();
+  const [assets, setAssets] = useState<AssetLibraryItem[]>([]);
+  const [selectedShotId, setSelectedShotId] = useState("");
+  const [draftRefs, setDraftRefs] = useState<AssetRef[]>([]);
+  const [label, setLabel] = useState("");
+  const [assetType, setAssetType] = useState("image");
+  const [role, setRole] = useState("style_reference");
+  const [usage, setUsage] = useState("extract_style");
+  const [textAsset, setTextAsset] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    setSelectedShotId((current) => {
+      if (detail.shots_detail.some((shot) => shot.id === current)) return current;
+      return detail.shots_detail[0]?.id || "";
+    });
+    fetchAssets(detail.name)
+      .then(setAssets)
+      .catch((failure) => setError(friendlyError(failure)));
+  }, [detail?.name]);
+
+  const selectedShot = detail?.shots_detail.find((shot) => shot.id === selectedShotId) || detail?.shots_detail[0];
+
+  useEffect(() => {
+    setDraftRefs(selectedShot?.refs ? selectedShot.refs.map((ref) => ({ ...ref })) : []);
+  }, [selectedShot?.id, detail?.shots_detail]);
+
+  if (!detail) return null;
+  const project = detail;
+
+  async function refreshAssets() {
+    setAssets(await fetchAssets(project.name));
+  }
+
+  async function upload() {
+    setBusy("upload");
+    setError("");
+    try {
+      const dataUrl = file ? await fileToDataUrl(file) : undefined;
+      const nextAssets = await uploadAsset(project.name, {
+        label: label.trim() || file?.name || "素材",
+        type: assetType,
+        role,
+        usage,
+        filename: file?.name,
+        data_url: dataUrl,
+        text: assetType === "text" && !file ? textAsset : undefined
+      });
+      setAssets(nextAssets);
+      setLabel("");
+      setTextAsset("");
+      setFile(null);
+      setMessage("素材已上传");
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveBindings() {
+    if (!selectedShot) return;
+    setBusy("bind");
+    setError("");
+    try {
+      const nextAssets = await saveAssetRefs(selectedShot.id, draftRefs);
+      setAssets(nextAssets);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function deleteOne(asset: AssetLibraryItem) {
+    setBusy(asset.id);
+    setError("");
+    try {
+      const nextAssets = await removeAsset(asset.id);
+      setAssets(nextAssets);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function toggleAsset(asset: AssetLibraryItem) {
+    setDraftRefs((current) => {
+      if (current.some((ref) => ref.path === asset.path)) {
+        return current.filter((ref) => ref.path !== asset.path);
+      }
+      return [
+        ...current,
+        {
+          path: asset.path,
+          type: asset.type,
+          role: asset.role,
+          usage: asset.usage
+        }
+      ];
+    });
+  }
+
+  return (
+    <section className="grid grid-cols-[minmax(320px,0.72fr)_minmax(0,1.28fr)] gap-4 max-2xl:grid-cols-1">
+      <article className="panel p-5">
+        <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <UploadCloud size={18} className="text-teal-700" />
+          上传素材
+        </div>
+        <div className="grid gap-3">
+          <LabeledInput label="素材名称" value={label} onChange={setLabel} />
+          <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
+            <LabeledSelect label="类型" value={assetType} options={assetTypeOptions} onChange={setAssetType} />
+            <LabeledSelect label="角色" value={role} options={assetRoleOptions} onChange={setRole} />
+            <LabeledSelect label="用途" value={usage} options={assetUsageOptions} onChange={setUsage} />
+          </div>
+          {assetType === "text" ? (
+            <LabeledTextarea label="文本内容" rows={5} value={textAsset} onChange={setTextAsset} />
+          ) : null}
+          <label className="btn justify-start">
+            <UploadCloud size={17} />
+            选择文件
+            <input
+              className="hidden"
+              type="file"
+              accept="image/*,video/*,audio/*,.txt,.md,.json"
+              onChange={(event) => setFile(event.target.files?.[0] || null)}
+            />
+          </label>
+          {file ? <div className="truncate text-xs text-slate-500">{file.name}</div> : null}
+          <button className="btn btn-primary" disabled={busy === "upload" || (!file && !textAsset.trim())} onClick={upload} type="button">
+            {busy === "upload" ? <Loader2 className="animate-spin" size={17} /> : <UploadCloud size={17} />}
+            上传到素材库
+          </button>
+          {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+        </div>
+      </article>
+
+      <div className="grid gap-4">
+        <article className="panel p-5">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                <ImagePlus size={18} className="text-teal-700" />
+                素材列表
+              </div>
+              <div className="mt-1 text-xs text-slate-500">{assets.length} 个素材</div>
+            </div>
+            <button className="btn" onClick={() => refreshAssets().catch((failure) => setError(friendlyError(failure)))} type="button">
+              <RefreshCw size={17} />
+              刷新
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-3 max-2xl:grid-cols-2 max-lg:grid-cols-1">
+            {assets.map((asset) => (
+              <AssetCard
+                key={asset.id}
+                asset={asset}
+                checked={draftRefs.some((ref) => ref.path === asset.path)}
+                projectName={detail.name}
+                busy={busy === asset.id}
+                onDelete={() => deleteOne(asset)}
+                onToggle={() => toggleAsset(asset)}
+              />
+            ))}
+            {!assets.length ? (
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                暂无素材
+              </div>
+            ) : null}
+          </div>
+        </article>
+
+        <article className="panel p-5">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Clapperboard size={18} className="text-teal-700" />
+              分镜绑定
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select className="control h-10 w-40" value={selectedShot?.id || ""} onChange={(event) => setSelectedShotId(event.target.value)}>
+                {detail.shots_detail.map((shot) => (
+                  <option key={shot.id} value={shot.id}>
+                    {shot.id}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-primary" disabled={busy === "bind" || !selectedShot} onClick={saveBindings} type="button">
+                {busy === "bind" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+                保存绑定
+              </button>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {draftRefs.map((ref) => (
+              <span key={ref.path} className="max-w-full truncate rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-xs text-teal-700">
+                {ref.path}
+              </span>
+            ))}
+            {!draftRefs.length ? <span className="text-sm text-slate-500">未绑定素材</span> : null}
+          </div>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function AssetCard({
+  asset,
+  busy,
+  checked,
+  onDelete,
+  onToggle,
+  projectName
+}: {
+  asset: AssetLibraryItem;
+  busy: boolean;
+  checked: boolean;
+  onDelete: () => void;
+  onToggle: () => void;
+  projectName: string;
+}) {
+  return (
+    <article className={`overflow-hidden rounded-lg border ${checked ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-white"}`}>
+      <button className="block aspect-video w-full bg-slate-100 text-left" onClick={onToggle} type="button">
+        <AssetPreview asset={asset} projectName={projectName} />
+      </button>
+      <div className="grid gap-3 p-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-slate-950">{asset.label}</div>
+          <div className="mt-1 truncate text-xs text-slate-500">{assetRoleLabel(asset.role)} · {assetUsageLabel(asset.usage)}</div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {asset.bound_shots.map((shotId) => (
+            <span key={shotId} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+              {shotId}
+            </span>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <button className={`btn h-8 px-2 text-xs ${checked ? "btn-soft" : ""}`} onClick={onToggle} type="button">
+            {checked ? "已选" : "绑定"}
+          </button>
+          <button className="btn h-8 border-red-200 px-2 text-xs text-red-700" disabled={busy} onClick={onDelete} type="button">
+            {busy ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+            移除
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AssetPreview({ asset, projectName }: { asset: AssetLibraryItem; projectName: string }) {
+  if (!asset.exists) {
+    return <div className="grid h-full place-items-center text-sm text-slate-400">文件缺失</div>;
+  }
+  const url = mediaUrl(projectName, asset.path);
+  if (asset.type === "image") {
+    return <img className="h-full w-full object-cover" src={url} alt={asset.label} />;
+  }
+  if (asset.type === "video") {
+    return <video className="h-full w-full object-cover" src={url} muted preload="metadata" />;
+  }
+  if (asset.type === "audio") {
+    return (
+      <div className="grid h-full place-items-center p-3">
+        <audio className="w-full" src={url} controls />
+      </div>
+    );
+  }
+  return (
+    <div className="grid h-full place-items-center px-4 text-center text-sm text-slate-500">
+      {asset.path}
+    </div>
+  );
+}
+
+function LabeledSelect({
+  label,
+  onChange,
+  options,
+  value
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+  value: string;
+}) {
+  return (
+    <label className="grid gap-1">
+      <span className="label">{label}</span>
+      <select className="control w-full" value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function fileToDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function assetRoleLabel(value: string) {
+  return assetRoleOptions.find((option) => option.value === value)?.label || value;
+}
+
+function assetUsageLabel(value: string) {
+  return assetUsageOptions.find((option) => option.value === value)?.label || value;
 }
 
 function ShotsPanel() {

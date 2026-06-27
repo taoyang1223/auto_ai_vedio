@@ -22,6 +22,25 @@ export type AssetRef = {
   usage: string;
 };
 
+export type AssetLibraryItem = AssetRef & {
+  id: string;
+  label: string;
+  exists: boolean;
+  bytes: number;
+  bound_shots: string[];
+  created_at?: string;
+};
+
+export type AssetUploadPayload = {
+  label: string;
+  type: string;
+  role: string;
+  usage: string;
+  filename?: string;
+  data_url?: string;
+  text?: string;
+};
+
 export type Shot = {
   id: string;
   title: string;
