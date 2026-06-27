@@ -677,6 +677,7 @@ function SortableShotCard({
   const { uploadFrame } = useAppStore();
   const style = { transform: CSS.Transform.toString(transform), transition };
   const firstFrame = firstFrameRef(shot);
+  const generatedClip = generatedClipRef(shot);
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -701,8 +702,35 @@ function SortableShotCard({
           onChange={(event) => updateShot(index, { title: event.target.value })}
           aria-label="分镜标题"
         />
+        {generatedClip ? (
+          <span className="inline-flex h-7 items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 text-xs font-medium text-teal-700">
+            <CheckCircle2 size={13} />
+            已生成
+          </span>
+        ) : null}
       </div>
       <div className="grid gap-4 p-4">
+        {generatedClip ? (
+          <div className="grid gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <Film size={17} className="text-teal-700" />
+                生成结果
+              </div>
+              <a className="btn h-8 px-2 text-xs" href={mediaUrl(projectName, generatedClip)} target="_blank" rel="noreferrer">
+                <Eye size={14} />
+                打开
+              </a>
+            </div>
+            <video
+              className="aspect-video w-full rounded-lg border border-slate-200 bg-slate-950 object-contain"
+              controls
+              preload="metadata"
+              poster={firstFrame ? mediaUrl(projectName, firstFrame) : undefined}
+              src={mediaUrl(projectName, generatedClip)}
+            />
+          </div>
+        ) : null}
         <div className="grid grid-cols-[132px_1fr] gap-3">
           <div className="h-[118px] overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
             {firstFrame ? (
@@ -1440,6 +1468,11 @@ function EmptyState({ hasTemplates }: { hasTemplates: boolean }) {
 
 function firstFrameRef(shot: Shot) {
   return shot.refs.find((ref) => ref.type === "image" && ref.role === "first_frame")?.path;
+}
+
+function generatedClipRef(shot: Shot) {
+  const clip = shot.manifest?.clip;
+  return typeof clip === "string" ? clip : "";
 }
 
 function mediaUrl(projectName: string, path: string) {

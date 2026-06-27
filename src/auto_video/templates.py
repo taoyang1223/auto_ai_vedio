@@ -176,6 +176,7 @@ remote_profiles:
     ssh_options:
       - "Port=<ssh-port>"
     remote_env:
+      PATH: /opt/auto-ai-video/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       COMFYUI_BASE_URL: http://127.0.0.1:6006
       COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
       COMFYUI_WORKFLOW_PROFILE: wan2_2_smoothmix_i2v
