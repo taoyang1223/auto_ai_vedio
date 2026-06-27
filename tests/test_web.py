@@ -746,3 +746,99 @@ def test_web_task_queue_runs_project_actions(tmp_path):
     assert plan_task["result"]["planned"][0]["provider"] == "mock"
     assert [task["id"] for task in project_tasks][:2] == [planned["id"], queued["id"]]
     assert global_tasks[0]["project"] == "demo"
+
+
+def test_web_task_one_click_production_runs_mock_pipeline(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/demo/tasks",
+            method="POST",
+            payload={"action": "produce-all", "payload": {"local_only": True}},
+        )["task"]
+        task = wait_task(base_url, queued["id"])
+
+    steps = [step["step"] for step in task["result"]["steps"]]
+    assert task["status"] == "succeeded"
+    assert steps == ["validate", "first_frames", "videos", "probe", "assemble", "continuity"]
+    assert task["result"]["steps"][2]["result"]["count"] == 1
+    assert task["result"]["steps"][4]["result"]["dry_run"] is True
+
+
+def test_web_task_extracts_continuity_tail_frames_dry_run(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        project = tmp_path / "wan_story"
+        clip = project / "generated" / "clips" / "S01.mp4"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"fake-video")
+        (project / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "project": "wan_story",
+                    "schema_version": "0.1",
+                    "assets": {},
+                    "shots": {"S01": {"status": "generated", "clip": "generated/clips/S01.mp4"}},
+                    "renders": {},
+                    "jobs": {},
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/wan_story/tasks",
+            method="POST",
+            payload={"action": "continuity", "payload": {"dry_run": True}},
+        )["task"]
+        task = wait_task(base_url, queued["id"])
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["planned"][0]["shot_id"] == "S01"
+    assert task["result"]["planned"][0]["next_shot_id"] == "S02"
+
+
+def test_web_task_remote_wrapup_dry_run_uses_profile(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        request_json(
+            base_url,
+            "/api/projects/wan_story/remote-profiles/autodl_5090",
+            method="PUT",
+            payload={
+                "host": "root@example.com",
+                "ssh_port": "2222",
+                "remote_dir": "/root/auto-video/jobs/wan_story",
+                "local_dir": "/tmp/auto-video-wan_story",
+            },
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/wan_story/tasks",
+            method="POST",
+            payload={"action": "remote-wrapup", "payload": {"profile": "autodl_5090", "dry_run": True}},
+        )["task"]
+        task = wait_task(base_url, queued["id"])
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["dry_run"] is True
+    assert task["result"]["host"] == "root@example.com"
+    assert task["result"]["checks"][0]["status"] == "planned"

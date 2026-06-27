@@ -486,6 +486,7 @@ function FinalRenderPreview({ detail }: { detail: ProjectDetail }) {
               <span>{detail.shots_detail.length} 个分镜</span>
               <span>{detail.config.width}x{detail.config.height}</span>
               <span>{detail.config.fps} FPS</span>
+              {finalRender.versions?.length ? <span>{finalRender.versions.length} 个历史版本</span> : null}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -493,6 +494,19 @@ function FinalRenderPreview({ detail }: { detail: ProjectDetail }) {
               <Eye size={17} />
               打开成片
             </a>
+            {finalRender.versions?.slice(-3).map((version, index) => (
+              <a
+                key={version.path}
+                className="btn"
+                href={mediaUrl(detail.name, version.path)}
+                target="_blank"
+                rel="noreferrer"
+                title={version.archived_at || version.path}
+              >
+                <Clock size={17} />
+                版本 {Math.max(1, (finalRender.versions?.length || 0) - 2 + index)}
+              </a>
+            ))}
             <span className="inline-flex h-10 items-center rounded-md border border-teal-200 bg-teal-50 px-3 text-sm font-medium text-teal-700">
               {finalRender.status === "generated" ? "已生成" : finalRender.status || "已保存"}
             </span>
@@ -1960,6 +1974,21 @@ function ReviewPanel() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button
+              className="btn btn-primary"
+              disabled={Boolean(busy) || !remoteProfile}
+              onClick={() =>
+                enqueue("produce-all", "一键完整生产", {
+                  profile: remoteProfile,
+                  provider: detail.config.default_video_provider,
+                  kind: "video"
+                })
+              }
+              type="button"
+            >
+              {busy === "produce-all" ? <Loader2 className="animate-spin" size={17} /> : <Wand2 size={17} />}
+              一键完整生产
+            </button>
+            <button
               className="btn"
               disabled={Boolean(busy) || !remoteProfile}
               onClick={() =>
@@ -1975,7 +2004,15 @@ function ReviewPanel() {
               {busy === "remote-run" ? <Loader2 className="animate-spin" size={17} /> : <Cloud size={17} />}
               生成剩余分镜
             </button>
-            <button className="btn btn-primary" disabled={Boolean(busy)} onClick={() => enqueue("assemble", "合成成片", {})} type="button">
+            <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("probe", "自动验片", { blackdetect: true })} type="button">
+              {busy === "probe" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
+              自动验片
+            </button>
+            <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("continuity", "提取连续性", { force: true })} type="button">
+              {busy === "continuity" ? <Loader2 className="animate-spin" size={17} /> : <Copy size={17} />}
+              提取连续性
+            </button>
+            <button className="btn" disabled={Boolean(busy)} onClick={() => enqueue("assemble", "合成成片", {})} type="button">
               {busy === "assemble" ? <Loader2 className="animate-spin" size={17} /> : <Film size={17} />}
               合成成片
             </button>
@@ -2437,6 +2474,13 @@ function RunPanel() {
       disabled: !firstRemoteProfile
     },
     {
+      key: "produce-all",
+      label: "一键完整生产",
+      icon: Wand2,
+      payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      disabled: !firstRemoteProfile
+    },
+    {
       key: "remote-run",
       label: "生成剩余分镜",
       icon: Cloud,
@@ -2444,8 +2488,16 @@ function RunPanel() {
       disabled: !firstRemoteProfile
     },
     { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
+    { key: "continuity", label: "提取连续性", icon: Copy, payload: { force: true } },
     { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} },
-    { key: "assemble", label: "合成成片", icon: Film, payload: {} }
+    { key: "assemble", label: "合成成片", icon: Film, payload: {} },
+    {
+      key: "remote-wrapup",
+      label: "远程收尾检查",
+      icon: Terminal,
+      payload: { profile: firstRemoteProfile },
+      disabled: !firstRemoteProfile
+    }
   ];
 
   async function run(action: (typeof actions)[number]) {

@@ -151,6 +151,11 @@ export type RenderSummary = {
   status?: string;
   path?: string;
   command?: string[];
+  versions?: Array<{
+    path: string;
+    archived_at?: string;
+    bytes?: number;
+  }>;
 };
 
 export type ProjectDetail = ProjectSummary & {

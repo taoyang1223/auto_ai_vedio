@@ -18,6 +18,7 @@ from urllib.parse import unquote, urlparse
 import yaml
 
 from .asset_library import delete_library_asset, list_asset_library, upload_library_asset
+from .continuity import extract_tail_frames
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
 from .first_frame_generation import generate_first_frames, promote_generated_images_to_first_frames
@@ -28,6 +29,7 @@ from .probe import probe_project
 from .project import load_project, resolve_project_path
 from .remote_profiles import build_remote_run_options_from_profile
 from .remote_transport import run_remote_worker
+from .remote_wrapup import RemoteWrapupOptions, run_remote_wrapup
 from .render import assemble_project
 from .script_storyboard import draft_storyboard_from_script
 from .templates import init_project, list_templates
@@ -54,6 +56,9 @@ ACTION_LABELS = {
     "remote-plan": "远程预案",
     "remote-run": "远程执行",
     "remote-first-frame": "远程生成首帧",
+    "produce-all": "一键完整生产",
+    "continuity": "提取连续性尾帧",
+    "remote-wrapup": "远程收尾检查",
 }
 PROMPT_PROFILE_KEYS = tuple(PromptProfile.__dataclass_fields__)
 
@@ -628,6 +633,22 @@ def _run_project_action(
     if action == "assemble":
         logger("开始合成成片")
         return assemble_project(load_project(project_root), dry_run=bool(payload.get("dry_run", False)))
+    if action == "continuity":
+        logger("提取已生成视频的尾帧，用于后续镜头连续性")
+        result = extract_tail_frames(
+            load_project(project_root),
+            dry_run=bool(payload.get("dry_run", False)),
+            force=bool(payload.get("force", False)),
+        )
+        logger(f"连续性尾帧完成，新增 {len(result.get('extracted', []))} 个，跳过 {len(result.get('skipped', []))} 个")
+        return result
+    if action == "produce-all":
+        return _run_full_production(project_root, payload, logger)
+    if action == "remote-wrapup":
+        project = load_project(project_root)
+        result = _run_remote_wrapup(project, payload)
+        logger("远程收尾检查完成")
+        return result
     if action == "comfyui-check":
         project = load_project(project_root)
         profile = str(payload.get("profile") or _first_workflow_profile(project, kind=str(payload.get("kind") or "image_to_video")))
@@ -663,6 +684,160 @@ def _run_project_action(
             logger(f"远程首帧已导回并绑定 {first_frames.get('count', 0)} 张")
         return result
     raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
+
+
+def _run_full_production(project_root: Path, payload: dict[str, Any], logger: TaskLogger) -> dict[str, Any]:
+    project = load_project(project_root)
+    steps: list[dict[str, Any]] = []
+    remote_profile = str(payload.get("profile") or _first_remote_profile(project) or "")
+    use_remote = bool(remote_profile) and not bool(payload.get("local_only", False))
+
+    logger("步骤 1/5：校验项目")
+    warnings = validate_project(project)
+    steps.append({"step": "validate", "warning_count": len(warnings), "warnings": warnings})
+
+    if not bool(payload.get("skip_first_frames", False)):
+        logger("步骤 2/5：生成或补齐首帧")
+        if use_remote and project.config.default_image_provider != "mock":
+            image_result = _run_remote_generation(
+                project,
+                profile=remote_profile,
+                provider=project.config.default_image_provider,
+                kind="image",
+                payload=payload,
+                skip_succeeded=True,
+            )
+            first_frames = promote_generated_images_to_first_frames(load_project(project_root), only=_payload_only(payload))
+            image_result = {**image_result, "first_frames": first_frames}
+        else:
+            image_result = generate_first_frames(
+                project,
+                provider_name=payload.get("image_provider") or project.config.default_image_provider,
+                only=_payload_only(payload),
+                skip_succeeded=True,
+            )
+        steps.append({"step": "first_frames", "result": image_result})
+
+    project = load_project(project_root)
+    logger("步骤 3/5：生成缺失或过期分镜视频")
+    if use_remote and project.config.default_video_provider != "mock":
+        video_result = _run_remote_generation(
+            project,
+            profile=remote_profile,
+            provider=payload.get("provider") or project.config.default_video_provider,
+            kind="video",
+            payload=payload,
+            skip_succeeded=True,
+        )
+    else:
+        video_results = submit_jobs(
+            project,
+            kind="video",
+            provider_name=payload.get("provider") or project.config.default_video_provider,
+            only=_payload_only(payload),
+            skip_succeeded=True,
+        )
+        video_result = {"count": len(video_results), "submitted": [_provider_result_summary(result, project.config.root) for result in video_results]}
+    steps.append({"step": "videos", "result": video_result})
+
+    project = load_project(project_root)
+    logger("步骤 4/5：自动验片")
+    probe = probe_project(
+        project,
+        dry_run=bool(payload.get("probe_dry_run", project.config.default_video_provider == "mock")),
+        blackdetect=bool(payload.get("blackdetect", True)),
+    )
+    steps.append({"step": "probe", "summary": probe.get("summary", {}), "result": probe})
+
+    project = load_project(project_root)
+    if not bool(payload.get("skip_assemble", False)):
+        logger("步骤 5/5：合成成片")
+        render = assemble_project(project, dry_run=bool(payload.get("dry_run", project.config.default_video_provider == "mock")))
+        steps.append({"step": "assemble", "result": render})
+    else:
+        logger("步骤 5/5：跳过合成")
+        steps.append({"step": "assemble", "skipped": True})
+
+    if bool(payload.get("extract_continuity", True)):
+        project = load_project(project_root)
+        continuity = extract_tail_frames(
+            project,
+            dry_run=bool(payload.get("dry_run", project.config.default_video_provider == "mock")),
+            force=True,
+        )
+        steps.append({"step": "continuity", "result": continuity})
+
+    return {"project": project.config.name, "remote": use_remote, "profile": remote_profile or None, "steps": steps}
+
+
+def _run_remote_generation(
+    project: Any,
+    *,
+    profile: str,
+    provider: str,
+    kind: str,
+    payload: dict[str, Any],
+    skip_succeeded: bool,
+) -> dict[str, Any]:
+    if skip_succeeded and not bool(payload.get("dry_run", False)):
+        plan = plan_jobs(project, kind=kind, provider_name=provider, only=_payload_only(payload), skip_succeeded=True)
+        if not plan.get("planned"):
+            return {"skipped": True, "reason": "no_missing_or_stale_jobs", "planned": []}
+    options = build_remote_run_options_from_profile(
+        project,
+        profile_name=profile,
+        host=payload.get("host") or None,
+        remote_dir=payload.get("remote_dir") or None,
+        provider_name=provider,
+        kind=kind,
+        only=_payload_only(payload),
+        failed_only=False,
+        skip_succeeded=skip_succeeded,
+        local_dir=Path(str(payload["local_dir"])) if payload.get("local_dir") else None,
+        remote_auto_video=payload.get("remote_auto_video") or None,
+        ssh_options=_string_tuple(payload.get("ssh_options"), field_name="ssh_options"),
+        rsync_options=_string_tuple(payload.get("rsync_options"), field_name="rsync_options"),
+        remote_env=_remote_env_items(payload.get("remote_env")),
+    )
+    return run_remote_worker(project, options, dry_run=bool(payload.get("dry_run", False)))
+
+
+def _first_remote_profile(project: Any) -> str | None:
+    names = sorted(project.config.remote_profiles)
+    return names[0] if names else None
+
+
+def _run_remote_wrapup(project: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    profile = str(payload.get("profile") or _first_remote_profile(project) or "")
+    if not profile:
+        raise ConfigError("项目没有远程配置", fix="请先在工作流配置里填写 AutoDL SSH 信息。")
+    options = build_remote_run_options_from_profile(
+        project,
+        profile_name=profile,
+        host=payload.get("host") or None,
+        remote_dir=payload.get("remote_dir") or None,
+        provider_name=payload.get("provider") or project.config.default_video_provider,
+        kind=str(payload.get("kind") or "video"),
+        only=None,
+        failed_only=False,
+        skip_succeeded=True,
+        local_dir=Path(str(payload["local_dir"])) if payload.get("local_dir") else None,
+        remote_auto_video=payload.get("remote_auto_video") or None,
+        ssh_options=_string_tuple(payload.get("ssh_options"), field_name="ssh_options"),
+        rsync_options=_string_tuple(payload.get("rsync_options"), field_name="rsync_options"),
+        remote_env=_remote_env_items(payload.get("remote_env")),
+    )
+    env = dict(item.split("=", 1) for item in options.remote_env if "=" in item)
+    comfyui_base_url = str(payload.get("comfyui_base_url") or env.get("COMFYUI_BASE_URL") or "http://127.0.0.1:6006")
+    return run_remote_wrapup(
+        RemoteWrapupOptions(
+            host=options.host,
+            remote_dir=options.remote_dir,
+            ssh_options=options.ssh_options,
+            comfyui_base_url=comfyui_base_url,
+        ),
+        dry_run=bool(payload.get("dry_run", False)),
+    )
 
 
 def _first_workflow_profile(project: Any, *, kind: str | None = None) -> str:

@@ -85,6 +85,24 @@ def test_assemble_project_runs_ffmpeg_and_records_render(demo_project_files):
     assert project.manifest["renders"]["final"]["path"] == "renders/final.mp4"
 
 
+def test_assemble_project_archives_previous_final_render(demo_project_files):
+    project = load_project(demo_project_files)
+    generate_videos(project, provider_name="mock", dry_run=False)
+    previous = demo_project_files / "renders" / "final.mp4"
+    previous.parent.mkdir(parents=True, exist_ok=True)
+    previous.write_bytes(b"old-final")
+    project = load_project(demo_project_files)
+
+    result = assemble_project(project, runner=FakeRenderRunner())
+
+    project = load_project(demo_project_files)
+    versions = project.manifest["renders"]["final"]["versions"]
+    archived = demo_project_files / versions[0]["path"]
+    assert result["archived"]["bytes"] == len(b"old-final")
+    assert archived.read_bytes() == b"old-final"
+    assert previous.read_bytes() == b"final-video"
+
+
 def test_assemble_project_dry_run_reports_input_checks(demo_project_files):
     project = load_project(demo_project_files)
     generate_videos(project, provider_name="mock", dry_run=False)

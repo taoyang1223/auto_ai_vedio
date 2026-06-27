@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -8,6 +9,7 @@ from .errors import RenderError
 from .manifest import ManifestStore
 from .models import Project
 from .project import resolve_project_path
+from .jobs import utc_now_iso
 
 
 class RenderRunner(Protocol):
@@ -93,6 +95,7 @@ def assemble_project(
     concat_file = resolve_project_path(root, str(plan["concat_file"]))
     output.parent.mkdir(parents=True, exist_ok=True)
     concat_file.parent.mkdir(parents=True, exist_ok=True)
+    archived = _archive_existing_render(root, output)
     _write_concat_file(project.config.root, plan, concat_file)
     command = tuple(str(part) for part in plan["ffmpeg"])
     (runner or SubprocessRenderRunner()).run(command)
@@ -101,8 +104,8 @@ def assemble_project(
             f"render output {plan['output']} was not created",
             fix="Check ffmpeg output and clip compatibility.",
         )
-    _record_render(project, output, command)
-    return {**result, "status": "succeeded", "bytes": output.stat().st_size}
+    _record_render(project, output, command, archived=archived)
+    return {**result, "status": "succeeded", "bytes": output.stat().st_size, "archived": archived}
 
 
 def _quality_checks(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -150,11 +153,40 @@ def _write_concat_file(project_root: Path, plan: dict[str, Any], concat_file: Pa
     concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _record_render(project: Project, output: Path, command: tuple[str, ...]) -> None:
+def _archive_existing_render(project_root: Path, output: Path) -> dict[str, Any] | None:
+    if not output.exists() or output.stat().st_size <= 0:
+        return None
+    stamp = utc_now_iso().replace(":", "").replace("-", "").replace("Z", "Z")
+    archive = project_root / "renders" / "versions" / f"{output.stem}_{stamp}{output.suffix}"
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(output, archive)
+    return {
+        "path": _relative(project_root, archive),
+        "archived_at": utc_now_iso(),
+        "bytes": archive.stat().st_size,
+    }
+
+
+def _record_render(project: Project, output: Path, command: tuple[str, ...], *, archived: dict[str, Any] | None = None) -> None:
     store = ManifestStore(project.config.root / "manifest.json", project_name=project.config.name)
+    previous = store.data["renders"].get("final")
+    versions = []
+    if isinstance(previous, dict) and isinstance(previous.get("versions"), list):
+        versions = list(previous["versions"])
+    if archived:
+        versions.append(archived)
     store.data["renders"]["final"] = {
         "status": "generated",
         "path": store._relative(output),
         "command": list(command),
     }
+    if versions:
+        store.data["renders"]["final"]["versions"] = versions
     store.save()
+
+
+def _relative(root: Path, value: Path) -> str:
+    try:
+        return value.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return value.as_posix()
