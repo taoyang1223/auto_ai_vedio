@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url-env")
     parser.add_argument("--workflow")
     parser.add_argument("--workflow-env")
+    parser.add_argument("--workflow-profile")
+    parser.add_argument("--workflow-profile-env")
     parser.add_argument("--timeout", type=float, default=1800)
     parser.add_argument("--poll-interval", type=float, default=2.0)
     parser.add_argument("--seed", type=int, default=42)
@@ -65,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> None:
+    _apply_workflow_profile(args)
     base_url = _base_url(args).rstrip("/")
     workflow_path = _workflow_path(args)
     payload = json.loads(Path(args.job).read_text(encoding="utf-8"))
@@ -92,6 +95,22 @@ def run(args: argparse.Namespace) -> None:
             ensure_ascii=False,
         )
     )
+
+
+def _apply_workflow_profile(args: argparse.Namespace) -> None:
+    profile_name = args.workflow_profile
+    if not profile_name and args.workflow_profile_env:
+        profile_name = os.environ.get(args.workflow_profile_env)
+    if not profile_name:
+        return
+    from .project import load_project
+    from .workflow_registry import comfyui_wan_adapter_options
+
+    project = load_project(args.project_root)
+    for key, value in comfyui_wan_adapter_options(project, profile_name).items():
+        if key in {"base_url", "base_url_env", "workflow", "workflow_env"} and getattr(args, key, None):
+            continue
+        setattr(args, key, value)
 
 
 def _base_url(args: argparse.Namespace) -> str:

@@ -107,6 +107,7 @@ class ProjectConfig:
     render: RenderConfig = field(default_factory=RenderConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     remote_profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    comfyui_workflows: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         configured = set(self.providers)

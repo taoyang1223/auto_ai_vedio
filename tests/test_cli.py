@@ -42,8 +42,21 @@ def test_cli_init_autodl_comfyui_wan_template(tmp_path: Path):
     assert main(["validate", str(project)]) == 0
     assert (project / "README.md").exists()
     assert "comfyui_wan" in (project / "project.yaml").read_text(encoding="utf-8")
+    assert "wan2_2_smoothmix_i2v" in (project / "project.yaml").read_text(encoding="utf-8")
     for shot_id in ("S01", "S02", "S03"):
         assert _png_size(project / "assets" / "refs" / f"{shot_id}_first_frame.png") == (832, 544)
+
+
+def test_cli_workflows_commands_use_template_registry(tmp_path: Path, capsys):
+    project = tmp_path / "wan_project"
+    assert main(["init", str(project), "--template", "autodl_comfyui_wan"]) == 0
+
+    assert main(["workflows", "list", str(project)]) == 0
+    assert "wan2_2_smoothmix_i2v" in capsys.readouterr().out
+    assert main(["workflows", "show", str(project), "wan2_2_smoothmix_i2v"]) == 0
+    assert "SmoothMix" in capsys.readouterr().out
+    assert main(["workflows", "env", str(project), "wan2_2_smoothmix_i2v"]) == 0
+    assert "COMFYUI_WORKFLOW_PROFILE=wan2_2_smoothmix_i2v" in capsys.readouterr().out
 
 
 def test_cli_init_rejects_overwrite_without_force(tmp_path: Path):

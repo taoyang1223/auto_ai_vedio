@@ -20,6 +20,7 @@ from .templates import init_project, list_templates
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
+from .workflow_registry import list_workflows, show_workflow, workflow_env_exports
 
 
 def _csv(value: str | None) -> set[str] | None:
@@ -160,6 +161,17 @@ def build_parser() -> argparse.ArgumentParser:
     providers = sub.add_parser("providers")
     providers_sub = providers.add_subparsers(dest="providers_command")
     providers_sub.add_parser("health")
+
+    workflows = sub.add_parser("workflows")
+    workflows_sub = workflows.add_subparsers(dest="workflows_command")
+    workflows_list = workflows_sub.add_parser("list")
+    workflows_list.add_argument("project")
+    workflows_show = workflows_sub.add_parser("show")
+    workflows_show.add_argument("project")
+    workflows_show.add_argument("name")
+    workflows_env = workflows_sub.add_parser("env")
+    workflows_env.add_argument("project")
+    workflows_env.add_argument("name")
     return parser
 
 
@@ -338,6 +350,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0 if result["ok"] else 1
         if args.command == "providers" and args.providers_command == "health":
             print(json.dumps({"mock": "ok"}, indent=2))
+            return 0
+        if args.command == "workflows" and args.workflows_command == "list":
+            print(json.dumps({"workflows": list_workflows(load_project(args.project))}, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "workflows" and args.workflows_command == "show":
+            print(json.dumps(show_workflow(load_project(args.project), args.name), ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "workflows" and args.workflows_command == "env":
+            exports = workflow_env_exports(load_project(args.project), args.name)
+            print(json.dumps({"profile": args.name, "env": exports}, ensure_ascii=False, indent=2))
             return 0
         parser.print_help()
         return 2

@@ -124,6 +124,23 @@ def _workflow(tmp_path: Path) -> Path:
     return path
 
 
+def _custom_workflow(tmp_path: Path) -> Path:
+    workflow = {
+        "900": {"class_type": "PrimitiveStringMultiline", "inputs": {"prompt_text": "old prompt"}},
+        "901": {"class_type": "CLIPTextEncode", "inputs": {"negative_text": "old negative"}},
+        "902": {"class_type": "LoadImage", "inputs": {"first_frame": "old.png"}},
+        "903": {"class_type": "VHS_VideoCombine", "inputs": {"prefix": "old", "fps": 16}},
+        "904": {"class_type": "KSamplerAdvanced", "inputs": {"sample_steps": 6, "cfg_scale": 1}},
+        "905": {"class_type": "KSamplerAdvanced", "inputs": {"sample_steps": 6, "cfg_scale": 1}},
+        "906": {"class_type": "Seed", "inputs": {"random_seed": -1}},
+        "907": {"class_type": "INTConstant", "inputs": {"seconds": 5}},
+        "908": {"class_type": "INTConstant", "inputs": {"pixels": 1024}},
+    }
+    path = tmp_path / "custom-workflow.json"
+    path.write_text(json.dumps(workflow, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def _payload(tmp_path: Path, *, refs: list[dict] | None = None) -> Path:
     project = tmp_path / "project"
     project.mkdir()
@@ -277,6 +294,121 @@ def test_comfyui_wan_adapter_module_reads_base_url_and_workflow_from_env(tmp_pat
 
     assert completed.returncode == 0, completed.stderr
     assert output.read_bytes() == b"module-video"
+
+
+def test_comfyui_wan_adapter_uses_workflow_profile_nodes(tmp_path: Path):
+    project = tmp_path / "project"
+    project.mkdir()
+    image = tmp_path / "first-frame.png"
+    image.write_bytes(b"fake-image")
+    workflow = _custom_workflow(tmp_path)
+    output = tmp_path / "out.mp4"
+    job = tmp_path / "job.json"
+    job.write_text(
+        json.dumps(
+            {
+                "job": {
+                    "id": "profile-demo:S01:video:comfyui_wan",
+                    "project_name": "profile-demo",
+                    "shot_id": "S01",
+                    "kind": "video",
+                    "provider": "comfyui_wan",
+                    "prompt": "profile prompt",
+                    "negative_prompt": "profile negative",
+                    "duration": 2,
+                    "output_path": "generated/clips/S01.mp4",
+                    "controls": {"width": 640, "height": 360, "fps": 10},
+                },
+                "project_root": project.as_posix(),
+                "output_path": output.as_posix(),
+                "references": [{"absolute_path": image.as_posix(), "type": "image", "exists": True}],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (project / "project.yaml").write_text(
+        f"""
+name: profile_demo
+width: 640
+height: 360
+fps: 10
+default_video_provider: comfyui_wan
+providers:
+  comfyui_wan:
+    mode: external_command
+comfyui_workflows:
+  custom_i2v:
+    workflow_path: {workflow.as_posix()}
+    parameters:
+      seed: 777
+      steps: 9
+      guidance_scale: 1.75
+    nodes:
+      prompt:
+        id: "900"
+        input: prompt_text
+      negative:
+        id: "901"
+        input: negative_text
+      image:
+        id: "902"
+        input: first_frame
+      seed:
+        id: "906"
+        input: random_seed
+      duration:
+        id: "907"
+        input: seconds
+      resolution:
+        id: "908"
+        input: pixels
+      video:
+        id: "903"
+        frame_rate_input: fps
+        filename_prefix_input: prefix
+      steps:
+        ids:
+          - "904"
+          - "905"
+        steps_input: sample_steps
+        cfg_input: cfg_scale
+""".lstrip(),
+        encoding="utf-8",
+    )
+    (project / "shots.json").write_text('{"shots":[{"id":"S01","duration":2,"visual_prompt":"x"}]}', encoding="utf-8")
+
+    with FakeComfyUIServer(media_body=b"profile-video") as server:
+        completed = _run_adapter_module(
+            [
+                "--base-url",
+                server.url,
+                "--workflow-profile",
+                "custom_i2v",
+                "--poll-interval",
+                "0.01",
+                "--job",
+                job.as_posix(),
+                "--project-root",
+                project.as_posix(),
+                "--output",
+                output.as_posix(),
+            ]
+        )
+
+    assert completed.returncode == 0, completed.stderr
+    assert output.read_bytes() == b"profile-video"
+    prompt_record = next(record for record in server.records if record["path"] == "/prompt")
+    prompt = json.loads(prompt_record["body"].decode("utf-8"))["prompt"]
+    assert prompt["900"]["inputs"]["prompt_text"] == "profile prompt"
+    assert prompt["901"]["inputs"]["negative_text"] == "profile negative"
+    assert prompt["902"]["inputs"]["first_frame"] == "uploaded-first-frame.png"
+    assert prompt["906"]["inputs"]["random_seed"] == 777
+    assert prompt["907"]["inputs"]["seconds"] == 2
+    assert prompt["908"]["inputs"]["pixels"] == 640
+    assert prompt["903"]["inputs"]["fps"] == 10
+    assert prompt["904"]["inputs"]["sample_steps"] == 9
+    assert prompt["904"]["inputs"]["cfg_scale"] == 1.75
 
 
 def test_comfyui_wan_adapter_requires_image_reference(tmp_path: Path):

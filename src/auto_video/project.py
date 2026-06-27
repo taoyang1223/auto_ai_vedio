@@ -104,6 +104,20 @@ def _remote_profiles(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _comfyui_workflows(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    workflows = data.get("comfyui_workflows") or {}
+    if not isinstance(workflows, dict):
+        raise ConfigError("comfyui_workflows must be a mapping", fix="Use workflow profile names as keys.")
+    result: dict[str, dict[str, Any]] = {}
+    for name, raw in workflows.items():
+        if raw is None:
+            raw = {}
+        if not isinstance(raw, dict):
+            raise ConfigError(f"ComfyUI workflow {name} must be a mapping", fix="Use key/value workflow settings.")
+        result[str(name)] = dict(raw)
+    return result
+
+
 def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
     name = data.get("name")
     if not name:
@@ -121,6 +135,7 @@ def _project_config(root: Path, data: dict[str, Any]) -> ProjectConfig:
         render=_render_config(data),
         providers=_provider_configs(data),
         remote_profiles=_remote_profiles(data),
+        comfyui_workflows=_comfyui_workflows(data),
     )
 
 

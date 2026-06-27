@@ -38,6 +38,7 @@ python3 -m venv .venv
 The `autodl_comfyui_wan` template creates a three-shot image-to-video project with:
 
 - `comfyui_wan` external-command provider config.
+- A `wan2_2_smoothmix_i2v` ComfyUI workflow registry entry with node mappings.
 - An `autodl_5090` remote profile ready for host, port, and workflow path edits.
 - Placeholder first-frame PNGs under `assets/refs/`.
 - A project-local README with the validate, remote run, assemble, and wrap-up commands.
@@ -235,7 +236,47 @@ providers:
       - COMFYUI_BASE_URL
       - --workflow-env
       - COMFYUI_WORKFLOW
+      - --workflow-profile-env
+      - COMFYUI_WORKFLOW_PROFILE
 ```
+
+Phase 22 adds a ComfyUI workflow registry so the stable workflow exported from the ComfyUI WebUI can be tracked with its node IDs, model notes, and recommended runtime settings:
+
+```yaml
+comfyui_workflows:
+  wan2_2_smoothmix_i2v:
+    title: Wan2.2 SmoothMix image-to-video
+    provider: comfyui_wan
+    kind: image_to_video
+    base_url: http://127.0.0.1:6006
+    base_url_env: COMFYUI_BASE_URL
+    workflow_env: COMFYUI_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+    profile_env: COMFYUI_WORKFLOW_PROFILE
+    parameters:
+      seed: 42
+      steps: 20
+    nodes:
+      prompt:
+        id: "257"
+        input: value
+      negative:
+        id: "218"
+        input: text
+      image:
+        id: "224"
+        input: image
+```
+
+List or inspect registered workflows:
+
+```bash
+.venv/bin/python -m auto_video workflows list demo_project
+.venv/bin/python -m auto_video workflows show demo_project wan2_2_smoothmix_i2v
+.venv/bin/python -m auto_video workflows env demo_project wan2_2_smoothmix_i2v
+```
+
+ComfyUI remains the workflow editor and debugging console. `auto-video` uses the registry plus the ComfyUI API for repeatable batch runs, so the final production path does not depend on manually clicking Run in the node UI.
 
 Remote run example:
 
@@ -261,6 +302,7 @@ remote_profiles:
     remote_env:
       COMFYUI_BASE_URL: http://127.0.0.1:6006
       COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+      COMFYUI_WORKFLOW_PROFILE: wan2_2_smoothmix_i2v
 ```
 
 Then list and use the profile:

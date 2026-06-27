@@ -105,12 +105,68 @@ providers:
       - COMFYUI_BASE_URL
       - --workflow-env
       - COMFYUI_WORKFLOW
+      - --workflow-profile-env
+      - COMFYUI_WORKFLOW_PROFILE
       - --timeout
       - "1800"
       - --seed
       - "42"
       - --steps
       - "20"
+comfyui_workflows:
+  wan2_2_smoothmix_i2v:
+    title: Wan2.2 SmoothMix image-to-video
+    provider: comfyui_wan
+    kind: image_to_video
+    base_url: http://127.0.0.1:6006
+    base_url_env: COMFYUI_BASE_URL
+    workflow_env: COMFYUI_WORKFLOW
+    workflow_path: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+    profile_env: COMFYUI_WORKFLOW_PROFILE
+    tags:
+      - wan2.2
+      - image-to-video
+      - autodl
+      - rtx5090
+    models:
+      video: Wan2.2 SmoothMix V2
+      trainer_image: wan2.2视频带工作流
+    recommended_gpu:
+      name: RTX 5090
+      vram_gb: 32
+      count: 1
+    parameters:
+      seed: 42
+      steps: 20
+    nodes:
+      prompt:
+        id: "257"
+        input: value
+      negative:
+        id: "218"
+        input: text
+      image:
+        id: "224"
+        input: image
+      seed:
+        id: "231"
+        input: seed
+      duration:
+        id: "238"
+        input: value
+      resolution:
+        id: "248"
+        input: value
+      video:
+        id: "230"
+        frame_rate_input: frame_rate
+        filename_prefix_input: filename_prefix
+      steps:
+        ids:
+          - "228"
+          - "229"
+        steps_input: steps
+        cfg_input: cfg
 remote_profiles:
   autodl_5090:
     host: "root@<autodl-host>"
@@ -122,6 +178,7 @@ remote_profiles:
     remote_env:
       COMFYUI_BASE_URL: http://127.0.0.1:6006
       COMFYUI_WORKFLOW: /root/zealman-app/workflows/G10-图生视频-Wan2.2SmoothMixV2.json
+      COMFYUI_WORKFLOW_PROFILE: wan2_2_smoothmix_i2v
 """
 
 AUTODL_SHOTS_JSON = """{
@@ -214,6 +271,8 @@ AutoDL ComfyUI Wan starter project for `auto-video`.
 
 ```bash
 auto-video validate .
+auto-video workflows list .
+auto-video workflows show . wan2_2_smoothmix_i2v
 auto-video remote profiles .
 auto-video remote run . --profile autodl_5090 --provider comfyui_wan --kind video
 auto-video probe . --strict
