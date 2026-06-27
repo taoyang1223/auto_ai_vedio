@@ -204,6 +204,11 @@ def test_web_api_creates_project_and_plans_jobs(tmp_path):
     assert listed["projects"][0]["name"] == "wan_story"
     workflow_names = {workflow["name"] for workflow in detail["project"]["workflows_detail"]}
     assert {"qwen2512_first_frame", "wan2_2_smoothmix_i2v"}.issubset(workflow_names)
+    workflow_titles = {workflow["title"] for workflow in detail["project"]["workflows_detail"]}
+    assert "Qwen2512 首帧文生图" in workflow_titles
+    assert "Wan2.2 SmoothMix 图生视频" in workflow_titles
+    shot_titles = [shot["title"] for shot in detail["project"]["shots_detail"]]
+    assert shot_titles == ["建立主角", "流程运转", "成片揭示"]
     assert validated["ok"] is True
     assert planned["result"]["planned"][0]["provider"] == "comfyui_wan"
 

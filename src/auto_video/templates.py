@@ -155,7 +155,7 @@ providers:
       - "20"
 comfyui_workflows:
   qwen2512_first_frame:
-    title: Qwen2512 first-frame text-to-image
+    title: Qwen2512 首帧文生图
     provider: comfyui_image
     kind: text_to_image
     base_url: http://127.0.0.1:6006
@@ -203,7 +203,7 @@ comfyui_workflows:
         steps_input: steps
         cfg_input: cfg
   wan2_2_smoothmix_i2v:
-    title: Wan2.2 SmoothMix image-to-video
+    title: Wan2.2 SmoothMix 图生视频
     provider: comfyui_wan
     kind: image_to_video
     base_url: http://127.0.0.1:6006
@@ -277,18 +277,18 @@ AUTODL_SHOTS_JSON = """{
   "shots": [
     {
       "id": "S01",
-      "title": "Opening subject",
+      "title": "建立主角",
       "duration": 4,
-      "intent": "Establish the main character and visual style",
+      "intent": "建立主角、场景和整片影像气质",
       "provider": "comfyui_wan",
-      "visual_prompt": "cinematic close shot of a focused creator reviewing a storyboard wall, modern studio, refined commercial lighting, detailed hands, natural motion",
-      "camera_motion": "slow dolly in with a gentle parallax shift",
-      "environment_motion": "soft monitor glow, paper notes moving slightly in the air",
-      "performance": "the creator turns from the board toward the camera with calm confidence",
-      "lighting": "soft key light, practical screen highlights, controlled contrast",
-      "audio_intent": "quiet studio texture and subtle cinematic pulse",
-      "subtitle": "A story starts with one clear frame",
-      "negative_prompt": "text, watermark, logo, bad hands, extra fingers, duplicated face, distorted body, low quality, blurry",
+      "visual_prompt": "电影感近景，一位专注的 AI 视频创作者正在检查故事板墙，现代影像工作室，精致商业灯光，手部细节自然，realistic cinematic commercial film",
+      "camera_motion": "缓慢向前推进，带轻微视差",
+      "environment_motion": "显示器柔和发光，纸质便签轻微晃动",
+      "performance": "创作者从故事板转向镜头，神情沉稳自信",
+      "lighting": "柔和主光，屏幕实践光，高级克制的对比度",
+      "audio_intent": "安静工作室氛围，轻微电影脉冲",
+      "subtitle": "一个清晰首帧，启动整条故事线",
+      "negative_prompt": "文字，水印，logo，坏手，多余手指，重复人脸，肢体变形，低质量，模糊",
       "refs": [
         {
           "path": "assets/refs/S01_first_frame.png",
@@ -300,18 +300,18 @@ AUTODL_SHOTS_JSON = """{
     },
     {
       "id": "S02",
-      "title": "Workflow motion",
+      "title": "流程运转",
       "duration": 4,
-      "intent": "Show the production process becoming alive",
+      "intent": "展示分镜、素材和视频生成流程被自动串联",
       "provider": "comfyui_wan",
-      "visual_prompt": "wide cinematic shot of a production desk where storyboard cards transform into glowing video thumbnails, realistic materials, elegant tech ambience",
-      "camera_motion": "sideways tracking shot across the desk",
-      "environment_motion": "cards lift slightly, light reflections travel across glass and metal surfaces",
-      "performance": "hands arrange the cards with precise deliberate movement",
-      "lighting": "warm practical desk light mixed with cool display light",
-      "audio_intent": "soft mechanical clicks and rising musical texture",
-      "subtitle": "Shots become a sequence",
-      "negative_prompt": "text, watermark, logo, unreadable UI, bad hands, extra fingers, flicker, low quality, blurry",
+      "visual_prompt": "电影感广角，制作桌上的故事板卡片逐渐变成发光的视频缩略图，真实材质，优雅科技氛围，premium tech product demo",
+      "camera_motion": "镜头沿桌面横向平移",
+      "environment_motion": "卡片轻微升起，玻璃和金属表面有流动反光",
+      "performance": "双手精准整理卡片，动作克制明确",
+      "lighting": "温暖桌灯与冷色屏幕光混合",
+      "audio_intent": "轻柔机械点击声，音乐能量逐步上升",
+      "subtitle": "分镜开始自动连成序列",
+      "negative_prompt": "文字，水印，logo，不可读界面，坏手，多余手指，闪烁，低质量，模糊",
       "refs": [
         {
           "path": "assets/refs/S02_first_frame.png",
@@ -323,18 +323,18 @@ AUTODL_SHOTS_JSON = """{
     },
     {
       "id": "S03",
-      "title": "Final reveal",
+      "title": "成片揭示",
       "duration": 4,
-      "intent": "Deliver a polished final result",
+      "intent": "呈现最终成片和完成感",
       "provider": "comfyui_wan",
-      "visual_prompt": "hero shot of a finished AI video playing on a large studio screen, satisfied creator silhouette, cinematic reveal, premium product-demo feeling",
-      "camera_motion": "slow crane up and subtle push forward",
-      "environment_motion": "screen reflections ripple gently, room lights brighten with the reveal",
-      "performance": "the creator steps back and watches the finished film with a small smile",
-      "lighting": "clean cinematic backlight, soft rim light, high-end studio finish",
-      "audio_intent": "resolved musical hit with clean room ambience",
-      "subtitle": "Then the film is ready",
-      "negative_prompt": "text, watermark, logo, broken screen, bad hands, distorted body, duplicate person, low quality, blurry",
+      "visual_prompt": "英雄镜头，大型工作室屏幕正在播放完成的 AI 视频，创作者满意地站在屏幕前，电影感揭示，高级产品演示气质",
+      "camera_motion": "缓慢升镜并轻微向前推进",
+      "environment_motion": "屏幕反光轻微波动，空间灯光随揭示逐渐变亮",
+      "performance": "创作者后退一步观看成片，露出克制微笑",
+      "lighting": "干净电影背光，柔和轮廓光，高级工作室收束",
+      "audio_intent": "收束的音乐重音，干净空间氛围",
+      "subtitle": "成片准备完成",
+      "negative_prompt": "文字，水印，logo，破损屏幕，坏手，肢体变形，重复人物，低质量，模糊",
       "refs": [
         {
           "path": "assets/refs/S03_first_frame.png",
@@ -350,16 +350,16 @@ AUTODL_SHOTS_JSON = """{
 
 AUTODL_README = """# __PROJECT_NAME__
 
-AutoDL ComfyUI Wan starter project for `auto-video`.
+AutoDL ComfyUI Wan 视频生成模板，适用于 `auto-video` 控制台。
 
-## Before running
+## 运行前检查
 
-1. Use the first-frame panel to generate or replace the placeholder PNG files in `assets/refs/`.
-2. Edit `project.yaml` and replace `<autodl-host>` and `<ssh-port>` in `remote_profiles.autodl_5090`.
-3. Confirm the workflow path in `COMFYUI_WORKFLOW` matches the workflow on the GPU instance.
-4. Start ComfyUI on AutoDL and make sure `http://127.0.0.1:6006` is reachable from the GPU host.
+1. 在控制台的“首帧设计”里生成或替换 `assets/refs/` 下的占位 PNG。
+2. 编辑 `project.yaml`，把 `remote_profiles.autodl_5090` 里的 `<autodl-host>` 和 `<ssh-port>` 换成 AutoDL 实例信息。
+3. 确认 `COMFYUI_WORKFLOW` 指向 GPU 实例上的真实工作流。
+4. 在 AutoDL 上启动 ComfyUI，确保 GPU 主机能访问 `http://127.0.0.1:6006`。
 
-## Useful commands
+## 常用命令
 
 ```bash
 auto-video validate .
@@ -375,7 +375,7 @@ auto-video assemble .
 auto-video remote wrapup --host root@<autodl-host> --remote-dir /root/auto-video/jobs/__PROJECT_NAME__ --ssh-option Port=<ssh-port>
 ```
 
-The generated placeholder images are only scaffolding. They keep validation deterministic, but real Wan output depends on high-quality first frames.
+模板自带的占位图只用于让项目能稳定通过校验。真实 Wan 视频质量主要取决于首帧质量、主体一致性提示词和工作流参数。
 """
 
 
@@ -392,7 +392,7 @@ TEMPLATES = {
     ),
     "autodl_comfyui_wan": ProjectTemplate(
         name="autodl_comfyui_wan",
-        description="Three-shot AutoDL ComfyUI Wan image-to-video starter project.",
+        description="三分镜 AutoDL ComfyUI Wan 图生视频模板。",
         text_files={
             "project.yaml": AUTODL_PROJECT_YAML,
             "shots.json": AUTODL_SHOTS_JSON,
