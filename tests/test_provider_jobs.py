@@ -3,6 +3,12 @@ from auto_video.project import load_project
 from auto_video.providers.mock import MockProvider
 
 
+def _png_size(path):
+    data = path.read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
 def test_mock_provider_executes_video_job(demo_project_files):
     project = load_project(demo_project_files)
     job = build_jobs(project, kind="video", provider_name="mock")[0]
@@ -26,5 +32,5 @@ def test_mock_provider_executes_image_job(demo_project_files):
 
     assert result.job_id == "demo_ad:S01:image:mock"
     assert result.status == "succeeded"
-    assert result.path == demo_project_files / "generated" / "images" / "S01.txt"
-    assert result.path.read_text(encoding="utf-8").startswith("mock image")
+    assert result.path == demo_project_files / "generated" / "images" / "S01.png"
+    assert _png_size(result.path) == (1080, 1920)

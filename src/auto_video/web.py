@@ -20,6 +20,7 @@ import yaml
 from .asset_library import delete_library_asset, list_asset_library, upload_library_asset
 from .errors import AutoVideoError, ConfigError
 from .comfyui_runtime_doctor import run as run_comfyui_doctor
+from .first_frame_generation import generate_first_frames, promote_generated_images_to_first_frames
 from .first_frame_prompt import draft_first_frame_prompts, save_first_frame_prompts
 from .models import AssetRef, PromptProfile
 from .pipeline import plan_jobs, submit_jobs
@@ -45,12 +46,14 @@ ACTION_LABELS = {
     "validate": "校验项目",
     "jobs-plan": "生成计划",
     "generate": "提交生成",
+    "first-frame-generate": "生成首帧",
     "probe": "验片",
     "assemble-plan": "合成预案",
     "assemble": "合成成片",
     "comfyui-check": "检查 ComfyUI 连接",
     "remote-plan": "远程预案",
     "remote-run": "远程执行",
+    "remote-first-frame": "远程生成首帧",
 }
 PROMPT_PROFILE_KEYS = tuple(PromptProfile.__dataclass_fields__)
 
@@ -473,6 +476,8 @@ def _project_detail(root: Path) -> dict[str, Any]:
             "height": project.config.height,
             "fps": project.config.fps,
             "default_video_provider": project.config.default_video_provider,
+            "default_image_provider": project.config.default_image_provider,
+            "default_audio_provider": project.config.default_audio_provider,
         },
         "prompt_profile": asdict(project.config.prompt_profile),
         "shots_detail": shots,
@@ -576,6 +581,18 @@ def _run_project_action(
             "count": len(results),
             "submitted": [_provider_result_summary(result, project.config.root) for result in results],
         }
+    if action == "first-frame-generate":
+        project = load_project(project_root)
+        logger("开始生成首帧图片")
+        result = generate_first_frames(
+            project,
+            provider_name=payload.get("provider") or None,
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", False)),
+        )
+        logger(f"首帧生成完成，已绑定 {result.get('first_frames', {}).get('count', 0)} 张")
+        return result
     if action == "probe":
         logger("开始检查生成媒体")
         result = probe_project(
@@ -597,16 +614,18 @@ def _run_project_action(
         profile = str(payload.get("profile") or _first_workflow_profile(project))
         logger(f"检查 ComfyUI 工作流：{profile}")
         return _run_comfyui_check(project, profile, payload)
-    if action in {"remote-plan", "remote-run"}:
+    if action in {"remote-plan", "remote-run", "remote-first-frame"}:
         project = load_project(project_root)
         logger("构建远程执行参数")
+        kind = "image" if action == "remote-first-frame" else str(payload.get("kind") or "video")
+        provider_name = payload.get("provider") or ("comfyui_wan" if kind == "video" else project.config.default_image_provider)
         options = build_remote_run_options_from_profile(
             project,
             profile_name=payload.get("profile") or None,
             host=payload.get("host") or None,
             remote_dir=payload.get("remote_dir") or None,
-            provider_name=payload.get("provider") or "comfyui_wan",
-            kind=str(payload.get("kind") or "video"),
+            provider_name=provider_name,
+            kind=kind,
             only=_payload_only(payload),
             failed_only=bool(payload.get("failed_only", False)),
             skip_succeeded=bool(payload.get("skip_succeeded", False)),
@@ -617,8 +636,13 @@ def _run_project_action(
             remote_env=_remote_env_items(payload.get("remote_env")),
         )
         dry_run = action == "remote-plan" or bool(payload.get("dry_run", False))
-        logger("远程预案生成中" if dry_run else "远程任务执行中")
-        return run_remote_worker(project, options, dry_run=dry_run)
+        logger("远程预案生成中" if dry_run else "远程首帧生成中" if action == "remote-first-frame" else "远程任务执行中")
+        result = run_remote_worker(project, options, dry_run=dry_run)
+        if action == "remote-first-frame" and not dry_run:
+            first_frames = promote_generated_images_to_first_frames(load_project(project_root), only=_payload_only(payload))
+            result = {**result, "first_frames": first_frames}
+            logger(f"远程首帧已导回并绑定 {first_frames.get('count', 0)} 张")
+        return result
     raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
 
 

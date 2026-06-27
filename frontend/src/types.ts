@@ -156,6 +156,8 @@ export type ProjectDetail = ProjectSummary & {
     height: number;
     fps: number;
     default_video_provider: string;
+    default_image_provider: string;
+    default_audio_provider: string;
   };
   prompt_profile: PromptProfile;
   shots_detail: Shot[];

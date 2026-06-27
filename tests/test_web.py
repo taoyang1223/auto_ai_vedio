@@ -419,6 +419,34 @@ def test_web_api_manages_first_frame_prompts(tmp_path):
     assert prompt_payload["prompts"][0]["shot_id"] == "S01"
 
 
+def test_web_task_generates_first_frames_and_updates_project_refs(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/demo/tasks",
+            method="POST",
+            payload={
+                "action": "first-frame-generate",
+                "payload": {"provider": "mock", "only": ["S01"]},
+            },
+        )["task"]
+        task = wait_task(base_url, queued["id"])
+        detail = request_json(base_url, "/api/projects/demo")["project"]
+
+    image_path = tmp_path / "demo" / "assets" / "refs" / "S01_first_frame.png"
+
+    assert task["status"] == "succeeded"
+    assert task["result"]["first_frames"]["count"] == 1
+    assert detail["shots_detail"][0]["refs"][0]["path"] == "assets/refs/S01_first_frame.png"
+    assert image_path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_web_api_drafts_and_applies_script_storyboard(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

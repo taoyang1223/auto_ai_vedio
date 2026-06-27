@@ -9,6 +9,7 @@ from .jobs import (
     utc_now_iso,
 )
 from .continuity import continuity_refs_for_shot
+from .first_frame_prompt import draft_first_frame_prompts
 from .models import Project, ShotPlan
 from .project import resolve_project_path
 from .prompts import plan_prompt
@@ -82,8 +83,15 @@ def build_jobs(
     only: set[str] | None = None,
 ) -> list[GenerationJob]:
     jobs: list[GenerationJob] = []
+    image_prompts = _first_frame_prompt_map(project) if kind == "image" else {}
     for shot in _select_shots(project, only):
-        provider = provider_name or shot.provider or _default_provider(project, kind)
+        provider = provider_name or (shot.provider if kind == "video" else None) or _default_provider(project, kind)
+        prompt = image_prompts.get(shot.id, {}).get("prompt") or plan_prompt(
+            shot,
+            provider=provider,
+            profile=project.config.prompt_profile,
+        )
+        negative_prompt = image_prompts.get(shot.id, {}).get("negative_prompt") or shot.negative_prompt
         now = utc_now_iso()
         jobs.append(
             GenerationJob(
@@ -92,8 +100,8 @@ def build_jobs(
                 shot_id=shot.id,
                 kind=kind,
                 provider=provider,
-                prompt=plan_prompt(shot, provider=provider, profile=project.config.prompt_profile),
-                negative_prompt=shot.negative_prompt,
+                prompt=prompt,
+                negative_prompt=negative_prompt,
                 duration=shot.duration if kind in {"video", "audio"} else None,
                 output_path=relative_output_path(shot.id, kind),
                 refs=_provider_refs(project, shot),
@@ -103,3 +111,13 @@ def build_jobs(
             )
         )
     return jobs
+
+
+def _first_frame_prompt_map(project: Project) -> dict[str, dict[str, str]]:
+    return {
+        str(item["shot_id"]): {
+            "prompt": str(item.get("prompt") or ""),
+            "negative_prompt": str(item.get("negative_prompt") or ""),
+        }
+        for item in draft_first_frame_prompts(project)
+    }

@@ -33,7 +33,7 @@ def make_job_id(project_name: str, shot_id: str, kind: str, provider: str) -> st
 def relative_output_path(shot_id: str, kind: str) -> str:
     _require_value(kind, JOB_KINDS, "job kind")
     if kind == "image":
-        return f"generated/images/{shot_id}.txt"
+        return f"generated/images/{shot_id}.png"
     if kind == "video":
         return f"generated/clips/{shot_id}.mp4"
     return f"generated/audio/{shot_id}.wav"

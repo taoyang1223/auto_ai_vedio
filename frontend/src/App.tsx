@@ -1226,20 +1226,43 @@ function assetUsageLabel(value: string) {
 }
 
 function FirstFramePanel() {
-  const { detail, loadFirstFramePrompts, saveFirstFrameDrafts, setMessage, uploadFrame } = useAppStore();
+  const { detail, enqueueTask, loadFirstFramePrompts, loadTask, saveFirstFrameDrafts, setMessage, uploadFrame } = useAppStore();
   const [prompts, setPrompts] = useState<FirstFramePrompt[]>([]);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [watchTaskId, setWatchTaskId] = useState("");
 
   useEffect(() => {
     if (!detail) return;
     reloadPrompts();
   }, [detail?.name]);
 
+  useEffect(() => {
+    if (!watchTaskId) return;
+    const tick = async () => {
+      try {
+        const task = await loadTask(watchTaskId);
+        if (["succeeded", "failed", "canceled"].includes(task.status)) {
+          setWatchTaskId("");
+          await reloadPrompts();
+        }
+      } catch (failure) {
+        setError(friendlyError(failure));
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 1500);
+    return () => window.clearInterval(timer);
+  }, [watchTaskId, loadTask]);
+
   if (!detail) return null;
+  const projectName = detail.name;
   const total = detail.shots_detail.length;
   const ready = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
   const customized = prompts.filter((prompt) => prompt.prompt !== prompt.generated_prompt || prompt.negative_prompt !== prompt.generated_negative_prompt).length;
+  const missingShotIds = detail.shots_detail.filter((shot) => !firstFrameRef(shot)).map((shot) => shot.id);
+  const imageProvider = detail.config.default_image_provider || "mock";
+  const remoteProfile = detail.remote_profiles_detail[0]?.name || "";
 
   async function reloadPrompts() {
     setBusy("load");
@@ -1314,6 +1337,35 @@ function FirstFramePanel() {
     }
   }
 
+  async function enqueueFirstFrameGeneration(shotIds: string[], label: string) {
+    if (!shotIds.length) return;
+    const useRemote = Boolean(remoteProfile) && imageProvider !== "mock";
+    const action = useRemote ? "remote-first-frame" : "first-frame-generate";
+    setBusy(`generate-${shotIds.join(",")}`);
+    setError("");
+    try {
+      const task = await enqueueTask(
+        projectName,
+        action,
+        {
+          profile: remoteProfile || undefined,
+          provider: imageProvider,
+          only: shotIds,
+          skip_succeeded: false
+        },
+        label
+      );
+      setWatchTaskId(task.id);
+      setMessage(`${label}已加入队列`);
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <section className="grid gap-4">
       <article className="panel p-5">
@@ -1328,6 +1380,15 @@ function FirstFramePanel() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              className="btn"
+              disabled={Boolean(watchTaskId) || Boolean(busy) || !missingShotIds.length}
+              onClick={() => enqueueFirstFrameGeneration(missingShotIds, "生成缺失首帧")}
+              type="button"
+            >
+              {watchTaskId || busy.startsWith("generate-") ? <Loader2 className="animate-spin" size={17} /> : <Wand2 size={17} />}
+              生成缺失首帧
+            </button>
             <button className="btn" disabled={busy === "load"} onClick={reloadPrompts} type="button">
               {busy === "load" ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
               刷新
@@ -1351,7 +1412,9 @@ function FirstFramePanel() {
               prompt={prompt}
               projectName={detail.name}
               shot={shot}
+              taskRunning={Boolean(watchTaskId)}
               onCopy={() => copyPrompt(prompt)}
+              onGenerate={() => enqueueFirstFrameGeneration([prompt.shot_id], `${prompt.shot_id} 生成首帧`)}
               onRestore={() => restoreGenerated(prompt.shot_id)}
               onUpdate={(key, value) => updatePrompt(prompt.shot_id, key, value)}
               onUpload={(file) => uploadShotFrame(prompt.shot_id, file)}
@@ -1366,21 +1429,25 @@ function FirstFramePanel() {
 function FirstFrameCard({
   busy,
   onCopy,
+  onGenerate,
   onRestore,
   onUpdate,
   onUpload,
   projectName,
   prompt,
-  shot
+  shot,
+  taskRunning
 }: {
   busy: string;
   onCopy: () => void;
+  onGenerate: () => void;
   onRestore: () => void;
   onUpdate: (key: "prompt" | "negative_prompt", value: string) => void;
   onUpload: (file: File) => void;
   projectName: string;
   prompt: FirstFramePrompt;
   shot?: Shot;
+  taskRunning: boolean;
 }) {
   const firstFrame = shot ? firstFrameRef(shot) : prompt.first_frame_path;
   const isCustom = prompt.prompt !== prompt.generated_prompt || prompt.negative_prompt !== prompt.generated_negative_prompt;
@@ -1429,6 +1496,10 @@ function FirstFrameCard({
             上传首帧
             <input className="hidden" type="file" accept="image/png,image/jpeg,image/webp" disabled={uploadBusy} onChange={handleUpload} />
           </label>
+          <button className="btn justify-start" disabled={taskRunning || busy.startsWith("generate-")} onClick={onGenerate} type="button">
+            {busy === `generate-${prompt.shot_id}` ? <Loader2 className="animate-spin" size={17} /> : <Wand2 size={17} />}
+            生成首帧
+          </button>
           {prompt.refs.length ? (
             <div className="flex flex-wrap gap-1">
               {prompt.refs.map((ref) => (
@@ -2346,6 +2417,12 @@ function RunPanel() {
 
   const actions = [
     { key: "validate", label: "校验项目", icon: CheckCircle2, payload: {} },
+    {
+      key: "first-frame-generate",
+      label: "生成首帧",
+      icon: ImagePlus,
+      payload: { provider: project.config.default_image_provider || "mock", skip_succeeded: true }
+    },
     { key: "jobs-plan", label: "生成计划", icon: Clapperboard, payload: { provider: project.config.default_video_provider, kind: "video" } },
     { key: "generate", label: "提交生成", icon: Play, payload: { provider: project.config.default_video_provider, kind: "video" } },
     {
@@ -2353,6 +2430,13 @@ function RunPanel() {
       label: "远程预案",
       icon: Cloud,
       payload: { profile: firstRemoteProfile, provider: "comfyui_wan", kind: "video" },
+      disabled: !firstRemoteProfile
+    },
+    {
+      key: "remote-first-frame",
+      label: "远程首帧",
+      icon: Cloud,
+      payload: { profile: firstRemoteProfile, provider: project.config.default_image_provider || "mock" },
       disabled: !firstRemoteProfile
     },
     {
