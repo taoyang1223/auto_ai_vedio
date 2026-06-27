@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import {
+  applyScriptStoryboard,
   cancelTask,
   createProject,
   deleteProject,
+  draftScriptStoryboard,
   enqueueProjectTask,
   fetchAuthStatus,
   fetchConfig,
@@ -20,7 +22,18 @@ import {
   updateWorkflowSettings,
   uploadFirstFrame
 } from "./api";
-import type { ProjectDetail, ProjectSummary, PromptProfile, RemoteProfilePayload, Shot, TemplateInfo, WebTask, WorkflowSettingsPayload } from "./types";
+import type {
+  ProjectDetail,
+  ProjectSummary,
+  PromptProfile,
+  RemoteProfilePayload,
+  ScriptDraftPayload,
+  ScriptDraftResult,
+  Shot,
+  TemplateInfo,
+  WebTask,
+  WorkflowSettingsPayload
+} from "./types";
 
 type AppState = {
   workspace: string;
@@ -44,6 +57,8 @@ type AppState = {
   persistShots: () => Promise<void>;
   persistConfig: (text: string) => Promise<void>;
   savePromptProfile: (payload: PromptProfile) => Promise<ProjectDetail>;
+  draftScriptShots: (payload: ScriptDraftPayload) => Promise<ScriptDraftResult>;
+  applyScriptShots: (shots: Shot[]) => Promise<ProjectDetail>;
   saveWorkflowSettings: (profile: string, payload: WorkflowSettingsPayload) => Promise<ProjectDetail>;
   saveRemoteProfile: (profile: string, payload: RemoteProfilePayload) => Promise<ProjectDetail>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
@@ -201,6 +216,21 @@ export const useAppStore = create<AppState>((set, get) => ({
     const saved = await updatePromptProfile(activeProject, payload);
     const configText = await fetchConfig(activeProject);
     set({ detail: saved, configText, message: "提示词设定已保存" });
+    await get().refreshProjects();
+    return saved;
+  },
+
+  draftScriptShots: async (payload: ScriptDraftPayload) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    return draftScriptStoryboard(activeProject, payload);
+  },
+
+  applyScriptShots: async (shots: Shot[]) => {
+    const activeProject = get().activeProject;
+    if (!activeProject) throw new Error("未选择项目");
+    const saved = await applyScriptStoryboard(activeProject, shots);
+    set({ detail: saved, message: "脚本分镜已应用" });
     await get().refreshProjects();
     return saved;
   },

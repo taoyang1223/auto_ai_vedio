@@ -49,11 +49,22 @@ import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
-import type { ComfyCheck, ProjectDetail, PromptProfile, RemoteProfileSummary, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
+import type {
+  ComfyCheck,
+  ProjectDetail,
+  PromptProfile,
+  ScriptDraftResult,
+  RemoteProfileSummary,
+  Shot,
+  WebTask,
+  WebTaskStatus,
+  WorkflowSummary
+} from "./types";
 
-type TabKey = "shots" | "prompt" | "review" | "workflow" | "run" | "config";
+type TabKey = "script" | "shots" | "prompt" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
+  { key: "script", label: "脚本拆镜", icon: Sparkles },
   { key: "shots", label: "分镜编排", icon: Clapperboard },
   { key: "prompt", label: "提示词", icon: Wand2 },
   { key: "review", label: "成片审看", icon: Eye },
@@ -419,6 +430,7 @@ function ProjectConsole() {
         })}
       </nav>
 
+      {tab === "script" ? <ScriptStoryboardPanel /> : null}
       {tab === "shots" ? <ShotsPanel /> : null}
       {tab === "prompt" ? <PromptProfilePanel /> : null}
       {tab === "review" ? <ReviewPanel /> : null}
@@ -660,6 +672,161 @@ function ProductionStatusPill({ status }: { status: ProductionStep["status"] }) 
       {label}
     </span>
   );
+}
+
+function ScriptStoryboardPanel() {
+  const { applyScriptShots, detail, draftScriptShots, setMessage } = useAppStore();
+  const [script, setScript] = useState("");
+  const [shotCount, setShotCount] = useState("3");
+  const [duration, setDuration] = useState("4");
+  const [provider, setProvider] = useState("");
+  const [draft, setDraft] = useState<ScriptDraftResult | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    setShotCount(String(detail.shots_detail.length || 3));
+    setDuration(String(detail.shots_detail[0]?.duration || 4));
+    setProvider(detail.config.default_video_provider);
+    setScript(defaultScriptFromProject(detail));
+    setDraft(null);
+    setError("");
+  }, [detail?.name]);
+
+  if (!detail) return null;
+  const project = detail;
+
+  async function generateDraft() {
+    setBusy("draft");
+    setError("");
+    try {
+      const result = await draftScriptShots({
+        script,
+        shot_count: Number(shotCount),
+        duration: Number(duration),
+        provider: provider.trim() || project.config.default_video_provider
+      });
+      setDraft(result);
+      setMessage("分镜草稿已生成");
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function applyDraft() {
+    if (!draft?.shots.length) return;
+    setBusy("apply");
+    setError("");
+    try {
+      await applyScriptShots(draft.shots);
+      setMessage("脚本分镜已应用，旧生成记录已清空");
+    } catch (failure) {
+      const message = friendlyError(failure);
+      setError(message);
+      setMessage(message);
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)] gap-4 max-2xl:grid-cols-1">
+      <article className="panel p-5">
+        <div className="mb-5 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <Sparkles size={18} className="text-teal-700" />
+          中文脚本
+        </div>
+        <div className="grid gap-3">
+          <label className="grid gap-1">
+            <span className="label">脚本内容</span>
+            <textarea
+              className="control h-auto min-h-[280px] w-full resize-y py-3 leading-7"
+              value={script}
+              onChange={(event) => setScript(event.target.value)}
+            />
+          </label>
+          <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
+            <LabeledInput label="分镜数量" type="number" value={shotCount} onChange={setShotCount} />
+            <LabeledInput label="单镜时长" type="number" value={duration} onChange={setDuration} />
+            <LabeledInput label="生成服务" value={provider} onChange={setProvider} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="btn btn-primary" disabled={busy === "draft" || !script.trim()} onClick={generateDraft} type="button">
+              {busy === "draft" ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
+              生成分镜草稿
+            </button>
+            <button className="btn" disabled={busy === "apply" || !draft?.shots.length} onClick={applyDraft} type="button">
+              {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+              应用到项目
+            </button>
+          </div>
+          {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+        </div>
+      </article>
+
+      <aside className="panel p-5">
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Clapperboard size={18} className="text-teal-700" />
+              草稿预览
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {draft ? `${draft.meta.shot_count} 个分镜 · ${draft.meta.duration}s · ${draft.meta.provider}` : "等待草稿"}
+            </div>
+          </div>
+          {draft?.shots.length ? (
+            <button className="btn btn-primary" disabled={busy === "apply"} onClick={applyDraft} type="button">
+              {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
+              应用草稿
+            </button>
+          ) : null}
+        </div>
+
+        {draft?.shots.length ? (
+          <div className="grid max-h-[780px] gap-3 overflow-auto pr-1">
+            {draft.shots.map((shot, index) => (
+              <article key={shot.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="text-lg font-bold text-teal-700">{shot.id}</span>
+                    <span className="truncate text-sm font-semibold text-slate-950">{shot.title}</span>
+                  </div>
+                  <span className="rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-500">
+                    {shot.duration}s
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 text-sm leading-6 text-slate-600">
+                  <div className="font-medium text-slate-800">{draft.source_segments[index]}</div>
+                  <div>{shot.visual_prompt}</div>
+                  <div className="grid grid-cols-2 gap-2 max-lg:grid-cols-1">
+                    <span className="rounded-md bg-slate-50 px-2 py-1">镜头：{shot.camera_motion}</span>
+                    <span className="rounded-md bg-slate-50 px-2 py-1">灯光：{shot.lighting}</span>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="grid min-h-[420px] place-items-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-500">
+            暂无草稿
+          </div>
+        )}
+      </aside>
+    </section>
+  );
+}
+
+function defaultScriptFromProject(detail: ProjectDetail) {
+  return detail.shots_detail
+    .map((shot) => shot.subtitle || shot.intent || shot.visual_prompt)
+    .filter(Boolean)
+    .join("。");
 }
 
 function ShotsPanel() {

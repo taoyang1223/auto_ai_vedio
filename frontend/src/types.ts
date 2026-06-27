@@ -92,6 +92,23 @@ export type PromptProfile = {
   negative: string;
 };
 
+export type ScriptDraftPayload = {
+  script: string;
+  shot_count: number;
+  duration: number;
+  provider?: string;
+};
+
+export type ScriptDraftResult = {
+  shots: Shot[];
+  source_segments: string[];
+  meta: {
+    shot_count: number;
+    duration: number;
+    provider: string;
+  };
+};
+
 export type RenderSummary = {
   status?: string;
   path?: string;

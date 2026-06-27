@@ -6,6 +6,9 @@ import type {
   ProjectDetail,
   ProjectSummary,
   RemoteProfilePayload,
+  ScriptDraftPayload,
+  ScriptDraftResult,
+  Shot,
   TemplateInfo,
   WebTask,
   WorkflowSettingsPayload
@@ -83,6 +86,22 @@ export async function updatePromptProfile(name: string, payload: PromptProfile):
   const { data } = await client.put<ApiEnvelope<{ project: ProjectDetail }>>(
     `/api/projects/${encodeURIComponent(name)}/prompt-profile`,
     payload
+  );
+  return data.project;
+}
+
+export async function draftScriptStoryboard(name: string, payload: ScriptDraftPayload): Promise<ScriptDraftResult> {
+  const { data } = await client.post<ApiEnvelope<ScriptDraftResult>>(
+    `/api/projects/${encodeURIComponent(name)}/script-draft`,
+    payload
+  );
+  return { shots: data.shots, source_segments: data.source_segments, meta: data.meta };
+}
+
+export async function applyScriptStoryboard(name: string, shots: Shot[]): Promise<ProjectDetail> {
+  const { data } = await client.post<ApiEnvelope<{ project: ProjectDetail }>>(
+    `/api/projects/${encodeURIComponent(name)}/script-apply`,
+    { shots }
   );
   return data.project;
 }

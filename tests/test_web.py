@@ -383,6 +383,47 @@ def test_web_api_updates_prompt_profile(tmp_path):
     assert project.config.prompt_profile.negative == "identity drift, style drift"
 
 
+def test_web_api_drafts_and_applies_script_storyboard(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "wan_story", "template": "autodl_comfyui_wan"},
+        )
+        manifest_path = tmp_path / "wan_story" / "manifest.json"
+        manifest_path.write_text(
+            json.dumps({"shots": {"S01": {"clip": "generated/clips/S01.mp4"}}, "renders": {"final": {"path": "renders/final.mp4"}}}),
+            encoding="utf-8",
+        )
+        drafted = request_json(
+            base_url,
+            "/api/projects/wan_story/script-draft",
+            method="POST",
+            payload={
+                "script": "创作者把一句想法写在故事板上。镜头展示自动化生产过程。最终视频在屏幕上播放。",
+                "shot_count": 3,
+                "duration": 4,
+            },
+        )
+        applied = request_json(
+            base_url,
+            "/api/projects/wan_story/script-apply",
+            method="POST",
+            payload={"shots": drafted["shots"]},
+        )
+
+    project = load_project(tmp_path / "wan_story")
+    manifest = json.loads((tmp_path / "wan_story" / "manifest.json").read_text(encoding="utf-8"))
+
+    assert len(drafted["shots"]) == 3
+    assert drafted["shots"][0]["title"].startswith("开场建立")
+    assert applied["applied"] == 3
+    assert project.shots[0].visual_prompt == drafted["shots"][0]["visual_prompt"]
+    assert manifest["shots"] == {}
+    assert manifest["renders"] == {}
+
+
 def test_web_serves_project_media(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

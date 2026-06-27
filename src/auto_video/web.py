@@ -26,6 +26,7 @@ from .project import load_project, resolve_project_path
 from .remote_profiles import build_remote_run_options_from_profile
 from .remote_transport import run_remote_worker
 from .render import assemble_project
+from .script_storyboard import draft_storyboard_from_script
 from .templates import init_project, list_templates
 from .validation import validate_project
 from .web_tasks import TaskLogger, WebTaskQueue
@@ -246,6 +247,14 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 return
             if method == "PUT" and tail == ["prompt-profile"]:
                 result = _update_prompt_profile(project_root, self._read_json())
+                self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
+                return
+            if method == "POST" and tail == ["script-draft"]:
+                result = draft_storyboard_from_script(load_project(project_root), self._read_json())
+                self._send_json({"ok": True, **result})
+                return
+            if method == "POST" and tail == ["script-apply"]:
+                result = _apply_script_storyboard(project_root, self._read_json())
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
                 return
             if method == "POST" and tail == ["first-frame"]:
@@ -1012,6 +1021,41 @@ def _write_shots(root: Path, shots: Any) -> None:
     except Exception:
         path.write_text(old, encoding="utf-8")
         raise
+
+
+def _apply_script_storyboard(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    shots = payload.get("shots")
+    if not isinstance(shots, list) or not shots:
+        raise ConfigError("脚本分镜不能为空", fix="请先生成分镜草稿，再应用到项目。")
+    shots_path = root / "shots.json"
+    manifest_path = root / "manifest.json"
+    old_shots = shots_path.read_text(encoding="utf-8") if shots_path.exists() else ""
+    old_manifest = manifest_path.read_text(encoding="utf-8") if manifest_path.exists() else None
+    try:
+        _write_shots(root, shots)
+        if bool(payload.get("reset_manifest", True)):
+            _reset_generation_manifest(root)
+    except Exception:
+        if old_shots:
+            shots_path.write_text(old_shots, encoding="utf-8")
+        if old_manifest is None:
+            manifest_path.unlink(missing_ok=True)
+        else:
+            manifest_path.write_text(old_manifest, encoding="utf-8")
+        raise
+    return {"applied": len(shots)}
+
+
+def _reset_generation_manifest(root: Path) -> None:
+    manifest_path = root / "manifest.json"
+    if not manifest_path.exists():
+        return
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        data = {}
+    data["shots"] = {}
+    data["renders"] = {}
+    manifest_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def _upload_first_frame(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
