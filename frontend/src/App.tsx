@@ -51,10 +51,11 @@ import { checkComfyWorkflow } from "./api";
 import { useAppStore } from "./store";
 import type { ComfyCheck, ProjectDetail, RemoteProfileSummary, Shot, WebTask, WebTaskStatus, WorkflowSummary } from "./types";
 
-type TabKey = "shots" | "workflow" | "run" | "config";
+type TabKey = "shots" | "review" | "workflow" | "run" | "config";
 
 const tabItems: Array<{ key: TabKey; label: string; icon: typeof Clapperboard }> = [
   { key: "shots", label: "分镜编排", icon: Clapperboard },
+  { key: "review", label: "成片审看", icon: Eye },
   { key: "workflow", label: "工作流配置", icon: Boxes },
   { key: "run", label: "任务运行", icon: Play },
   { key: "config", label: "项目配置", icon: Settings }
@@ -418,6 +419,7 @@ function ProjectConsole() {
       </nav>
 
       {tab === "shots" ? <ShotsPanel /> : null}
+      {tab === "review" ? <ReviewPanel /> : null}
       {tab === "workflow" ? <WorkflowPanel /> : null}
       {tab === "run" ? <RunPanel /> : null}
       {tab === "config" ? <ConfigPanel /> : null}
@@ -578,6 +580,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const totalShots = detail.shots_detail.length;
   const readyShots = detail.shots_detail.filter((shot) => shot.visual_prompt.trim() && Number(shot.duration) > 0).length;
   const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
+  const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
   const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
   const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
   const failedTasks = tasks.filter((task) => task.status === "failed").length;
@@ -610,7 +613,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
     {
       key: "tasks",
       label: "任务运行",
-      metric: activeTasks ? `${activeTasks} 个进行中` : failedTasks ? `${failedTasks} 个失败` : succeededTasks ? `${succeededTasks} 个完成` : "未提交",
+      metric: activeTasks ? `${activeTasks} 个进行中` : generatedShots ? `${generatedShots}/${totalShots} 已生成` : failedTasks ? `${failedTasks} 个失败` : succeededTasks ? `${succeededTasks} 个完成` : "未提交",
       status: activeTasks ? "running" : failedTasks ? "warn" : succeededTasks ? "done" : "pending",
       tab: "run",
       icon: Activity
@@ -620,7 +623,7 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
       label: "最终成片",
       metric: renderCount ? `${renderCount} 个结果` : "未生成",
       status: renderCount ? "done" : "pending",
-      tab: "run",
+      tab: "review",
       icon: Film
     }
   ];
@@ -695,7 +698,15 @@ function ShotsPanel() {
         <SortableContext items={project.shots_detail.map((shot) => shot.id)} strategy={rectSortingStrategy}>
           <div className="grid grid-cols-3 gap-4 max-2xl:grid-cols-2 max-lg:grid-cols-1">
             {project.shots_detail.map((shot, index) => (
-              <SortableShotCard key={shot.id} index={index} projectName={project.name} shot={shot} updateShot={updateShot} />
+              <SortableShotCard
+                key={shot.id}
+                defaultProvider={project.config.default_video_provider}
+                index={index}
+                projectName={project.name}
+                remoteProfile={project.remote_profiles_detail[0]?.name || ""}
+                shot={shot}
+                updateShot={updateShot}
+              />
             ))}
           </div>
         </SortableContext>
@@ -705,26 +716,54 @@ function ShotsPanel() {
 }
 
 function SortableShotCard({
+  defaultProvider,
   index,
   projectName,
+  remoteProfile,
   shot,
   updateShot
 }: {
+  defaultProvider: string;
   index: number;
   projectName: string;
+  remoteProfile: string;
   shot: Shot;
   updateShot: (index: number, patch: Partial<Shot>) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: shot.id });
-  const { uploadFrame } = useAppStore();
+  const { enqueueTask, setMessage, uploadFrame } = useAppStore();
   const style = { transform: CSS.Transform.toString(transform), transition };
   const firstFrame = firstFrameRef(shot);
   const generatedClip = generatedClipRef(shot);
+  const [rerunning, setRerunning] = useState(false);
+  const [rerunError, setRerunError] = useState("");
 
   async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     await uploadFrame(shot.id, file);
+  }
+
+  async function rerunShot() {
+    if (!remoteProfile) {
+      setRerunError("请先在工作流配置里填写远程机器");
+      return;
+    }
+    setRerunning(true);
+    setRerunError("");
+    try {
+      await enqueueTask(
+        projectName,
+        "remote-run",
+        { profile: remoteProfile, provider: shot.provider || defaultProvider, kind: "video", only: [shot.id] },
+        `${shot.id} 重跑`
+      );
+      setMessage(`${shot.id} 重跑已加入队列`);
+    } catch (error) {
+      setRerunError(String((error as Error).message || error));
+    } finally {
+      setRerunning(false);
+    }
   }
 
   return (
@@ -807,6 +846,176 @@ function SortableShotCard({
           上传首帧
           <input className="hidden" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleUpload} />
         </label>
+        <button className="btn justify-start" disabled={rerunning} onClick={rerunShot} type="button">
+          {rerunning ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
+          重跑此镜头
+        </button>
+        {rerunError ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{rerunError}</div> : null}
+      </div>
+    </article>
+  );
+}
+
+function ReviewPanel() {
+  const { detail, enqueueTask, setMessage } = useAppStore();
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  if (!detail) return null;
+
+  const remoteProfile = detail.remote_profiles_detail[0]?.name || "";
+  const projectName = detail.name;
+  const generatedShots = detail.shots_detail.filter((shot) => Boolean(generatedClipRef(shot))).length;
+  const finalRender = detail.renders.final;
+
+  async function enqueue(action: string, label: string, payload: Record<string, unknown>) {
+    setBusy(action);
+    setError("");
+    try {
+      await enqueueTask(projectName, action, payload, label);
+      setMessage(`${label}已加入队列`);
+    } catch (failure) {
+      setError(String((failure as Error).message || failure));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <section className="grid gap-4">
+      <div className="panel p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Eye size={18} className="text-teal-700" />
+              成片审看
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              {generatedShots}/{detail.shots_detail.length} 分镜已生成 · {finalRender?.path ? "成片已生成" : "未合成"}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="btn"
+              disabled={Boolean(busy) || !remoteProfile}
+              onClick={() =>
+                enqueue("remote-run", "生成剩余分镜", {
+                  profile: remoteProfile,
+                  provider: detail.config.default_video_provider,
+                  kind: "video",
+                  skip_succeeded: true
+                })
+              }
+              type="button"
+            >
+              {busy === "remote-run" ? <Loader2 className="animate-spin" size={17} /> : <Cloud size={17} />}
+              生成剩余分镜
+            </button>
+            <button className="btn btn-primary" disabled={Boolean(busy)} onClick={() => enqueue("assemble", "合成成片", {})} type="button">
+              {busy === "assemble" ? <Loader2 className="animate-spin" size={17} /> : <Film size={17} />}
+              合成成片
+            </button>
+          </div>
+        </div>
+        {error ? <div className="mt-3 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
+      </div>
+
+      {finalRender?.path ? (
+        <article className="panel overflow-hidden">
+          <video className="aspect-video w-full bg-slate-950 object-contain" controls preload="metadata" src={mediaUrl(detail.name, finalRender.path)} />
+        </article>
+      ) : null}
+
+      <div className="grid grid-cols-3 gap-4 max-2xl:grid-cols-2 max-lg:grid-cols-1">
+        {detail.shots_detail.map((shot) => (
+          <ReviewShotCard
+            key={shot.id}
+            defaultProvider={detail.config.default_video_provider}
+            projectName={detail.name}
+            remoteProfile={remoteProfile}
+            shot={shot}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReviewShotCard({
+  defaultProvider,
+  projectName,
+  remoteProfile,
+  shot
+}: {
+  defaultProvider: string;
+  projectName: string;
+  remoteProfile: string;
+  shot: Shot;
+}) {
+  const { enqueueTask, setMessage } = useAppStore();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const firstFrame = firstFrameRef(shot);
+  const generatedClip = generatedClipRef(shot);
+
+  async function rerunShot() {
+    if (!remoteProfile) {
+      setError("请先在工作流配置里填写远程机器");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await enqueueTask(
+        projectName,
+        "remote-run",
+        { profile: remoteProfile, provider: shot.provider || defaultProvider, kind: "video", only: [shot.id] },
+        `${shot.id} 重跑`
+      );
+      setMessage(`${shot.id} 重跑已加入队列`);
+    } catch (failure) {
+      setError(String((failure as Error).message || failure));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="panel overflow-hidden">
+      <div className="flex h-14 items-center justify-between gap-3 border-b border-slate-100 px-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-lg font-bold text-teal-700">{shot.id}</span>
+            <span className="truncate text-sm font-semibold text-slate-900">{shot.title}</span>
+          </div>
+          <div className="mt-0.5 text-xs text-slate-500">{generatedClip ? "已生成" : "未生成"}</div>
+        </div>
+        <button className="btn h-9 px-2 text-xs" disabled={busy} onClick={rerunShot} type="button">
+          {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
+          重跑
+        </button>
+      </div>
+      <div className="grid gap-3 p-4">
+        {generatedClip ? (
+          <video
+            className="aspect-video w-full rounded-lg border border-slate-200 bg-slate-950 object-contain"
+            controls
+            preload="metadata"
+            poster={firstFrame ? mediaUrl(projectName, firstFrame) : undefined}
+            src={mediaUrl(projectName, generatedClip)}
+          />
+        ) : (
+          <div className="aspect-video overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
+            {firstFrame ? (
+              <img className="h-full w-full object-cover" src={mediaUrl(projectName, firstFrame)} alt={`${shot.id} 首帧`} />
+            ) : (
+              <div className="grid h-full place-items-center text-slate-400">
+                <ImagePlus size={28} />
+              </div>
+            )}
+          </div>
+        )}
+        <div className="line-clamp-3 text-sm leading-6 text-slate-600">{shot.visual_prompt}</div>
+        {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
       </div>
     </article>
   );

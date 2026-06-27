@@ -237,7 +237,13 @@ export const useAppStore = create<AppState>((set, get) => ({
     const task = await fetchTask(id);
     const current = get().tasks;
     const exists = current.some((item) => item.id === id);
-    set({ tasks: exists ? current.map((item) => (item.id === id ? task : item)) : [task, ...current] });
+    const updates: Partial<AppState> = {
+      tasks: exists ? current.map((item) => (item.id === id ? task : item)) : [task, ...current]
+    };
+    if (task.project === get().activeProject && ["succeeded", "failed", "canceled"].includes(task.status)) {
+      updates.detail = await fetchProject(task.project);
+    }
+    set(updates);
     return task;
   },
 
