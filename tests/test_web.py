@@ -120,6 +120,19 @@ def test_web_api_deletes_project(tmp_path):
     assert not (tmp_path / "delete_me").exists()
 
 
+def test_web_missing_project_returns_chinese_error(tmp_path):
+    with running_web(tmp_path) as base_url:
+        try:
+            request_json(base_url, "/api/projects/missing")
+        except HTTPError as exc:
+            body = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("missing project should fail")
+
+    assert body["error"] == "项目不存在或配置缺失"
+    assert body["fix"] == "请从左侧选择现有项目，或重新新建项目。"
+
+
 def test_web_api_saves_shots_and_uploads_first_frame(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

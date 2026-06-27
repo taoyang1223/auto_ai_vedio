@@ -86,14 +86,31 @@ function ConsoleShell() {
   const [bootError, setBootError] = useState("");
 
   useEffect(() => {
-    boot().catch((error) => setBootError(String(error.message || error)));
+    boot()
+      .then(() => setBootError(""))
+      .catch((error) => setBootError(friendlyError(error)));
   }, [boot]);
 
   useEffect(() => {
-    if (authenticated && projectName && projectName !== activeProject) {
-      selectProject(projectName).catch((error) => setBootError(String(error.message || error)));
+    if (!authenticated || !projectName || !projects.length) return;
+    if (!projects.some((project) => project.name === projectName)) {
+      const fallback = activeProject && projects.some((project) => project.name === activeProject) ? activeProject : projects[0].name;
+      setBootError("");
+      navigate(`/projects/${encodeURIComponent(fallback)}`, { replace: true });
+      return;
     }
-  }, [authenticated, projectName, activeProject, selectProject]);
+    if (projectName !== activeProject) {
+      selectProject(projectName)
+        .then(() => setBootError(""))
+        .catch((error) => {
+          const fallback = activeProject && projects.some((project) => project.name === activeProject) ? activeProject : projects[0]?.name;
+          if (fallback && fallback !== projectName) {
+            navigate(`/projects/${encodeURIComponent(fallback)}`, { replace: true });
+          }
+          setBootError(friendlyError(error));
+        });
+    }
+  }, [authenticated, projectName, activeProject, projects, selectProject, navigate]);
 
   useEffect(() => {
     if (authenticated && !projectName && activeProject) {
@@ -885,6 +902,17 @@ function taskResultText(task: WebTask) {
     return JSON.stringify({ error: task.error, fix: task.fix }, null, 2);
   }
   return "任务尚未产生结果";
+}
+
+function friendlyError(error: unknown) {
+  const message = String((error as Error)?.message || error || "");
+  if (message.includes("missing project.yaml") || message.includes("Create project.yaml")) {
+    return "项目不存在或配置文件缺失\n请从左侧选择现有项目，或重新新建项目。";
+  }
+  if (message.includes("project not found")) {
+    return "项目不存在\n请从左侧选择现有项目，或重新新建项目。";
+  }
+  return message;
 }
 
 function ConfigPanel() {

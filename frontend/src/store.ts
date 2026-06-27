@@ -64,21 +64,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   boot: async () => {
     set({ loading: true });
-    const auth = await fetchAuthStatus();
-    set({ authEnabled: auth.enabled, authenticated: auth.authenticated });
-    if (auth.enabled && !auth.authenticated) {
+    try {
+      const auth = await fetchAuthStatus();
+      set({ authEnabled: auth.enabled, authenticated: auth.authenticated });
+      if (auth.enabled && !auth.authenticated) {
+        set({ loading: false });
+        return;
+      }
+      const [templates, projectsPayload] = await Promise.all([fetchTemplates(), fetchProjects()]);
+      set({
+        templates,
+        workspace: projectsPayload.workspace,
+        projects: projectsPayload.projects,
+        loading: false
+      });
+      const current = get().activeProject;
+      const active = projectsPayload.projects.some((project) => project.name === current) ? current : projectsPayload.projects[0]?.name;
+      if (active) await get().selectProject(active);
+    } catch (error) {
       set({ loading: false });
-      return;
+      throw error;
     }
-    const [templates, projectsPayload] = await Promise.all([fetchTemplates(), fetchProjects()]);
-    set({
-      templates,
-      workspace: projectsPayload.workspace,
-      projects: projectsPayload.projects,
-      loading: false
-    });
-    const active = get().activeProject || projectsPayload.projects[0]?.name;
-    if (active) await get().selectProject(active);
   },
 
   loginWithToken: async (token: string) => {
@@ -112,17 +118,27 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   selectProject: async (name: string) => {
-    set({ loading: true, activeProject: name });
-    const [detail, configText, tasks] = await Promise.all([fetchProject(name), fetchConfig(name), fetchProjectTasks(name)]);
-    set({ detail, configText, tasks, loading: false, message: "" });
+    set({ loading: true });
+    try {
+      const [detail, configText, tasks] = await Promise.all([fetchProject(name), fetchConfig(name), fetchProjectTasks(name)]);
+      set({ activeProject: name, detail, configText, tasks, loading: false, message: "" });
+    } catch (error) {
+      set({ loading: false });
+      throw error;
+    }
   },
 
   createNewProject: async (name: string, template: string) => {
     set({ loading: true });
-    await createProject(name, template);
-    const projectsPayload = await fetchProjects();
-    set({ workspace: projectsPayload.workspace, projects: projectsPayload.projects, activeProject: name, loading: false });
-    await get().selectProject(name);
+    try {
+      await createProject(name, template);
+      const projectsPayload = await fetchProjects();
+      set({ workspace: projectsPayload.workspace, projects: projectsPayload.projects, loading: false });
+      await get().selectProject(name);
+    } catch (error) {
+      set({ loading: false });
+      throw error;
+    }
   },
 
   deleteExistingProject: async (name: string) => {

@@ -219,6 +219,7 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 _delete_project(project_root, task_queue.list(project=project_name))
                 self._send_json({"ok": True, "deleted": project_name})
                 return
+            _ensure_project_exists(project_root)
             if method == "GET" and not tail:
                 self._send_json({"ok": True, "project": _project_detail(project_root)})
                 return
@@ -597,6 +598,11 @@ def _delete_project(root: Path, tasks: list[dict[str, Any]]) -> None:
     if active:
         raise ConfigError("project has active tasks", fix="Wait for running tasks to finish or cancel queued tasks before deleting.")
     shutil.rmtree(root)
+
+
+def _ensure_project_exists(root: Path) -> None:
+    if not root.exists() or not root.is_dir() or not (root / "project.yaml").exists() or not (root / "shots.json").exists():
+        raise ConfigError("项目不存在或配置缺失", fix="请从左侧选择现有项目，或重新新建项目。")
 
 
 def _project_path(workspace: Path, name: str) -> Path:
