@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .errors import AutoVideoError, ConfigError
-from .pipeline import plan_jobs
+from .pipeline import plan_jobs, submit_jobs
 from .probe import probe_project
 from .project import load_project, resolve_project_path
 from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
@@ -22,6 +22,7 @@ from .remote_transport import run_remote_worker
 from .render import assemble_project
 from .templates import init_project, list_templates
 from .validation import validate_project
+from .web_tasks import TaskLogger, WebTaskQueue
 from .workflow_registry import list_workflows
 
 
@@ -30,6 +31,16 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 STATIC_DIR = Path(__file__).with_name("web_static")
 SESSION_COOKIE = "auto_video_web_session"
 DEFAULT_TOKEN_ENV = "AUTO_VIDEO_WEB_TOKEN"
+ACTION_LABELS = {
+    "validate": "校验项目",
+    "jobs-plan": "生成计划",
+    "generate": "提交生成",
+    "probe": "验片",
+    "assemble-plan": "合成预案",
+    "assemble": "合成成片",
+    "remote-plan": "远程预案",
+    "remote-run": "远程执行",
+}
 
 
 def run_web_server(
@@ -69,6 +80,7 @@ def make_web_server(
 
 def _handler_factory(workspace: Path, *, token: str | None):
     session_value = _session_value(token) if token else None
+    task_queue = WebTaskQueue()
 
     class AutoVideoWebHandler(BaseHTTPRequestHandler):
         server_version = "AutoVideoWeb/0.1"
@@ -176,6 +188,9 @@ def _handler_factory(workspace: Path, *, token: str | None):
             raise ConfigError("unknown auth API route", fix="Use /api/auth/login or /api/auth/status.")
 
         def _handle_api(self, method: str, parts: list[str]) -> None:
+            if parts[:1] == ["tasks"]:
+                self._handle_tasks(method, parts[1:])
+                return
             if method == "GET" and parts == ["templates"]:
                 self._send_json({"ok": True, "templates": list_templates()})
                 return
@@ -216,59 +231,52 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 result = _upload_first_frame(project_root, self._read_json())
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
                 return
+            if method == "GET" and tail == ["tasks"]:
+                self._send_json({"ok": True, "tasks": task_queue.list(project=project_name)})
+                return
+            if method == "POST" and tail == ["tasks"]:
+                task = _enqueue_project_task(task_queue, project_name, project_root, self._read_json())
+                self._send_json({"ok": True, "task": task}, status=202)
+                return
             if method == "POST" and tail == ["validate"]:
-                project = load_project(project_root)
-                warnings = validate_project(project)
-                self._send_json({"ok": True, "warnings": warnings})
+                result = _run_project_action(project_root, "validate", self._read_json())
+                self._send_json({"ok": True, **result})
                 return
             if method == "POST" and tail == ["jobs-plan"]:
-                payload = self._read_json()
-                project = load_project(project_root)
-                result = plan_jobs(
-                    project,
-                    kind=str(payload.get("kind") or "video"),
-                    provider_name=payload.get("provider") or None,
-                    failed_only=bool(payload.get("failed_only", False)),
-                    skip_succeeded=bool(payload.get("skip_succeeded", False)),
-                )
+                result = _run_project_action(project_root, "jobs-plan", self._read_json())
                 self._send_json({"ok": True, "result": result})
                 return
             if method == "POST" and tail == ["probe"]:
-                payload = self._read_json()
-                result = probe_project(
-                    load_project(project_root),
-                    dry_run=bool(payload.get("dry_run", False)),
-                    blackdetect=bool(payload.get("blackdetect", False)),
-                )
+                result = _run_project_action(project_root, "probe", self._read_json())
                 self._send_json({"ok": True, "result": result})
                 return
             if method == "POST" and tail == ["assemble-plan"]:
-                result = assemble_project(load_project(project_root), dry_run=True)
+                result = _run_project_action(project_root, "assemble-plan", self._read_json())
                 self._send_json({"ok": True, "result": result})
                 return
             if method == "POST" and tail == ["remote-plan"]:
-                payload = self._read_json()
-                project = load_project(project_root)
-                options = build_remote_run_options_from_profile(
-                    project,
-                    profile_name=payload.get("profile") or None,
-                    host=None,
-                    remote_dir=None,
-                    provider_name=payload.get("provider") or "comfyui_wan",
-                    kind=str(payload.get("kind") or "video"),
-                    only=None,
-                    failed_only=bool(payload.get("failed_only", False)),
-                    skip_succeeded=bool(payload.get("skip_succeeded", False)),
-                    local_dir=None,
-                    remote_auto_video=None,
-                    ssh_options=(),
-                    rsync_options=(),
-                    remote_env=(),
-                )
-                result = run_remote_worker(project, options, dry_run=True)
+                result = _run_project_action(project_root, "remote-plan", self._read_json())
                 self._send_json({"ok": True, "result": result})
                 return
             raise ConfigError("unknown project API route", fix="Refresh the web console and retry.")
+
+        def _handle_tasks(self, method: str, parts: list[str]) -> None:
+            if method == "GET" and not parts:
+                self._send_json({"ok": True, "tasks": task_queue.list()})
+                return
+            if method == "GET" and len(parts) == 1:
+                task = task_queue.get(parts[0])
+                if task is None:
+                    raise ConfigError("task not found", fix="Refresh the task list.")
+                self._send_json({"ok": True, "task": task})
+                return
+            if method == "POST" and len(parts) == 2 and parts[1] == "cancel":
+                task = task_queue.cancel(parts[0])
+                if task is None:
+                    raise ConfigError("task not found", fix="Refresh the task list.")
+                self._send_json({"ok": True, "task": task})
+                return
+            raise ConfigError("unknown task API route", fix="Use /api/tasks or /api/tasks/<id>.")
 
         def _handle_media(self, parts: list[str]) -> None:
             if len(parts) < 2:
@@ -403,6 +411,174 @@ def _project_detail(root: Path) -> dict[str, Any]:
         "remote_profiles_detail": list_remote_profiles(project),
         "workflows_detail": list_workflows(project),
         "renders": project.manifest.get("renders", {}),
+    }
+
+
+def _enqueue_project_task(
+    queue: WebTaskQueue,
+    project_name: str,
+    project_root: Path,
+    request_payload: dict[str, Any],
+) -> dict[str, Any]:
+    action = str(request_payload.get("action") or "").strip()
+    if not action:
+        raise ConfigError("task action is required", fix="Choose a production action.")
+    payload = _task_payload(request_payload)
+    label = str(request_payload.get("label") or ACTION_LABELS.get(action, action))
+
+    def runner(log: TaskLogger) -> Any:
+        return _run_project_action(project_root, action, payload, log=log)
+
+    return queue.enqueue(project=project_name, action=action, label=label, payload=payload, runner=runner)
+
+
+def _task_payload(request_payload: dict[str, Any]) -> dict[str, Any]:
+    raw_payload = request_payload.get("payload")
+    if raw_payload is None:
+        raw_payload = {key: value for key, value in request_payload.items() if key not in {"action", "label"}}
+    if not isinstance(raw_payload, dict):
+        raise ConfigError("task payload must be an object", fix="Send payload as a JSON object.")
+    return raw_payload
+
+
+def _run_project_action(
+    project_root: Path,
+    action: str,
+    payload: dict[str, Any],
+    *,
+    log: TaskLogger | None = None,
+) -> Any:
+    logger = log or (lambda _message: None)
+    if action not in ACTION_LABELS:
+        raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
+    if action == "validate":
+        logger("读取项目配置并执行结构校验")
+        warnings = validate_project(load_project(project_root))
+        logger(f"校验完成，警告 {len(warnings)} 条")
+        return {"warnings": warnings, "warning_count": len(warnings)}
+    if action == "jobs-plan":
+        project = load_project(project_root)
+        logger("根据分镜和 provider 生成任务计划")
+        result = plan_jobs(
+            project,
+            kind=str(payload.get("kind") or "video"),
+            provider_name=payload.get("provider") or None,
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", False)),
+        )
+        logger(f"计划任务 {len(result.get('planned', []))} 个")
+        return result
+    if action == "generate":
+        project = load_project(project_root)
+        kind = str(payload.get("kind") or "video")
+        logger(f"开始提交 {kind} 生成任务")
+        results = submit_jobs(
+            project,
+            kind=kind,
+            provider_name=payload.get("provider") or None,
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", False)),
+        )
+        logger(f"生成执行完成，共返回 {len(results)} 个结果")
+        return {
+            "count": len(results),
+            "submitted": [_provider_result_summary(result, project.config.root) for result in results],
+        }
+    if action == "probe":
+        logger("开始检查生成媒体")
+        result = probe_project(
+            load_project(project_root),
+            dry_run=bool(payload.get("dry_run", False)),
+            blackdetect=bool(payload.get("blackdetect", False)),
+        )
+        summary = result.get("summary", {}) if isinstance(result, dict) else {}
+        logger(f"验片完成，通过 {summary.get('passed', 0)}，失败 {summary.get('failed', 0)}")
+        return result
+    if action == "assemble-plan":
+        logger("生成合成预案")
+        return assemble_project(load_project(project_root), dry_run=True)
+    if action == "assemble":
+        logger("开始合成成片")
+        return assemble_project(load_project(project_root), dry_run=bool(payload.get("dry_run", False)))
+    if action in {"remote-plan", "remote-run"}:
+        project = load_project(project_root)
+        logger("构建远程执行参数")
+        options = build_remote_run_options_from_profile(
+            project,
+            profile_name=payload.get("profile") or None,
+            host=payload.get("host") or None,
+            remote_dir=payload.get("remote_dir") or None,
+            provider_name=payload.get("provider") or "comfyui_wan",
+            kind=str(payload.get("kind") or "video"),
+            only=_payload_only(payload),
+            failed_only=bool(payload.get("failed_only", False)),
+            skip_succeeded=bool(payload.get("skip_succeeded", False)),
+            local_dir=Path(str(payload["local_dir"])) if payload.get("local_dir") else None,
+            remote_auto_video=payload.get("remote_auto_video") or None,
+            ssh_options=_string_tuple(payload.get("ssh_options"), field_name="ssh_options"),
+            rsync_options=_string_tuple(payload.get("rsync_options"), field_name="rsync_options"),
+            remote_env=_remote_env_items(payload.get("remote_env")),
+        )
+        dry_run = action == "remote-plan" or bool(payload.get("dry_run", False))
+        logger("远程预案生成中" if dry_run else "远程任务执行中")
+        return run_remote_worker(project, options, dry_run=dry_run)
+    raise ConfigError("unsupported task action", fix=f"Use one of: {', '.join(sorted(ACTION_LABELS))}.")
+
+
+def _payload_only(payload: dict[str, Any]) -> set[str] | None:
+    value = payload.get("only")
+    if not value:
+        return None
+    if isinstance(value, str):
+        return {item.strip() for item in value.split(",") if item.strip()}
+    if isinstance(value, list):
+        return {str(item).strip() for item in value if str(item).strip()}
+    raise ConfigError("only must be a comma-separated string or list", fix="Use shot ids such as S01,S02.")
+
+
+def _remote_env_items(value: Any) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if isinstance(value, dict):
+        return tuple(f"{key}={item}" for key, item in value.items())
+    if isinstance(value, list):
+        return tuple(str(item) for item in value)
+    raise ConfigError("remote_env must be an object or list", fix="Use KEY=value entries.")
+
+
+def _string_tuple(value: Any, *, field_name: str) -> tuple[str, ...]:
+    if not value:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, list):
+        return tuple(str(item) for item in value)
+    raise ConfigError(f"{field_name} must be a string or list", fix="Use command-line style option strings.")
+
+
+def _provider_result_summary(result: Any, root: Path) -> dict[str, Any]:
+    path = result.path
+    if path is not None:
+        try:
+            path_text = path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            path_text = path.as_posix()
+    else:
+        path_text = None
+    return {
+        "job_id": result.job_id,
+        "shot_id": result.shot_id,
+        "kind": result.kind,
+        "provider": result.provider,
+        "status": result.status,
+        "path": path_text,
+        "duration": result.duration,
+        "provider_job_id": result.provider_job_id,
+        "error": result.error,
+        "retryable": result.retryable,
+        "metadata": result.metadata,
     }
 
 

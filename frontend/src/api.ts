@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ApiEnvelope, ProjectDetail, ProjectSummary, TemplateInfo } from "./types";
+import type { ApiEnvelope, ProjectDetail, ProjectSummary, TemplateInfo, WebTask } from "./types";
 
 const client = axios.create({
   headers: { "Content-Type": "application/json" },
@@ -79,7 +79,31 @@ export async function uploadFirstFrame(name: string, shotId: string, file: File)
   return data.project;
 }
 
-export async function runProjectAction(name: string, action: string, payload: Record<string, unknown> = {}) {
-  const { data } = await client.post<ApiEnvelope<Record<string, unknown>>>(`/api/projects/${encodeURIComponent(name)}/${action}`, payload);
-  return data.result ?? data;
+export async function enqueueProjectTask(
+  name: string,
+  action: string,
+  payload: Record<string, unknown> = {},
+  label?: string
+): Promise<WebTask> {
+  const { data } = await client.post<ApiEnvelope<{ task: WebTask }>>(`/api/projects/${encodeURIComponent(name)}/tasks`, {
+    action,
+    label,
+    payload
+  });
+  return data.task;
+}
+
+export async function fetchProjectTasks(name: string): Promise<WebTask[]> {
+  const { data } = await client.get<ApiEnvelope<{ tasks: WebTask[] }>>(`/api/projects/${encodeURIComponent(name)}/tasks`);
+  return data.tasks;
+}
+
+export async function fetchTask(id: string): Promise<WebTask> {
+  const { data } = await client.get<ApiEnvelope<{ task: WebTask }>>(`/api/tasks/${encodeURIComponent(id)}`);
+  return data.task;
+}
+
+export async function cancelTask(id: string): Promise<WebTask> {
+  const { data } = await client.post<ApiEnvelope<{ task: WebTask }>>(`/api/tasks/${encodeURIComponent(id)}/cancel`, {});
+  return data.task;
 }

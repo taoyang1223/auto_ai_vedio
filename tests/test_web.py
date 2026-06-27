@@ -1,6 +1,7 @@
 import base64
 import json
 import threading
+import time
 from contextlib import contextmanager
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -55,6 +56,16 @@ def request_bytes(base_url, path, *, headers=None):
     request = Request(f"{base_url}{path}", headers=headers or {})
     with urlopen(request, timeout=5) as response:
         return response.read()
+
+
+def wait_task(base_url, task_id, *, headers=None):
+    for _ in range(40):
+        payload = request_json(base_url, f"/api/tasks/{task_id}", headers=headers)
+        task = payload["task"]
+        if task["status"] in {"succeeded", "failed", "canceled"}:
+            return task
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not finish")
 
 
 def test_web_serves_app_shell(tmp_path):
@@ -196,3 +207,38 @@ def test_web_auth_protects_api_and_media(tmp_path):
     assert listed["ok"] is True
     assert bearer["ok"] is True
     assert media_body == b"protected-preview"
+
+
+def test_web_task_queue_runs_project_actions(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "demo", "template": "demo"},
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/demo/tasks",
+            method="POST",
+            payload={"action": "validate"},
+        )["task"]
+        validate_task = wait_task(base_url, queued["id"])
+
+        planned = request_json(
+            base_url,
+            "/api/projects/demo/tasks",
+            method="POST",
+            payload={"action": "jobs-plan", "payload": {"provider": "mock", "kind": "video"}},
+        )["task"]
+        plan_task = wait_task(base_url, planned["id"])
+        project_tasks = request_json(base_url, "/api/projects/demo/tasks")["tasks"]
+        global_tasks = request_json(base_url, "/api/tasks")["tasks"]
+
+    assert queued["status"] == "queued"
+    assert validate_task["status"] == "succeeded"
+    assert validate_task["result"]["warning_count"] == 0
+    assert plan_task["status"] == "succeeded"
+    assert plan_task["result"]["planned"][0]["provider"] == "mock"
+    assert [task["id"] for task in project_tasks][:2] == [planned["id"], queued["id"]]
+    assert global_tasks[0]["project"] == "demo"

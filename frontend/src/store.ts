@@ -1,10 +1,14 @@
 import { create } from "zustand";
 import {
+  cancelTask,
   createProject,
+  enqueueProjectTask,
   fetchAuthStatus,
   fetchConfig,
   fetchProject,
   fetchProjects,
+  fetchProjectTasks,
+  fetchTask,
   fetchTemplates,
   login,
   logout,
@@ -12,7 +16,7 @@ import {
   saveShots,
   uploadFirstFrame
 } from "./api";
-import type { ProjectDetail, ProjectSummary, Shot, TemplateInfo } from "./types";
+import type { ProjectDetail, ProjectSummary, Shot, TemplateInfo, WebTask } from "./types";
 
 type AppState = {
   workspace: string;
@@ -23,6 +27,7 @@ type AppState = {
   configText: string;
   loading: boolean;
   message: string;
+  tasks: WebTask[];
   authEnabled: boolean;
   authenticated: boolean;
   boot: () => Promise<void>;
@@ -35,6 +40,10 @@ type AppState = {
   persistConfig: (text: string) => Promise<void>;
   uploadFrame: (shotId: string, file: File) => Promise<void>;
   refreshProjects: () => Promise<void>;
+  refreshTasks: (project?: string) => Promise<void>;
+  enqueueTask: (project: string, action: string, payload?: Record<string, unknown>, label?: string) => Promise<WebTask>;
+  loadTask: (id: string) => Promise<WebTask>;
+  cancelQueuedTask: (id: string) => Promise<void>;
   setMessage: (message: string) => void;
 };
 
@@ -47,6 +56,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   configText: "",
   loading: false,
   message: "",
+  tasks: [],
   authEnabled: false,
   authenticated: true,
 
@@ -88,6 +98,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       configText: "",
       detail: null,
       projects: [],
+      tasks: [],
       templates: [],
       workspace: ""
     });
@@ -100,8 +111,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   selectProject: async (name: string) => {
     set({ loading: true, activeProject: name });
-    const [detail, configText] = await Promise.all([fetchProject(name), fetchConfig(name)]);
-    set({ detail, configText, loading: false, message: "" });
+    const [detail, configText, tasks] = await Promise.all([fetchProject(name), fetchConfig(name), fetchProjectTasks(name)]);
+    set({ detail, configText, tasks, loading: false, message: "" });
   },
 
   createNewProject: async (name: string, template: string) => {
@@ -140,6 +151,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!activeProject) return;
     const saved = await uploadFirstFrame(activeProject, shotId, file);
     set({ detail: saved, message: "首帧已更新" });
+  },
+
+  refreshTasks: async (project?: string) => {
+    const name = project || get().activeProject;
+    if (!name) return;
+    const tasks = await fetchProjectTasks(name);
+    set({ tasks });
+  },
+
+  enqueueTask: async (project: string, action: string, payload: Record<string, unknown> = {}, label?: string) => {
+    const task = await enqueueProjectTask(project, action, payload, label);
+    set({ tasks: [task, ...get().tasks.filter((item) => item.id !== task.id)] });
+    return task;
+  },
+
+  loadTask: async (id: string) => {
+    const task = await fetchTask(id);
+    const current = get().tasks;
+    const exists = current.some((item) => item.id === id);
+    set({ tasks: exists ? current.map((item) => (item.id === id ? task : item)) : [task, ...current] });
+    return task;
+  },
+
+  cancelQueuedTask: async (id: string) => {
+    const task = await cancelTask(id);
+    set({ tasks: get().tasks.map((item) => (item.id === id ? task : item)) });
   },
 
   setMessage: (message: string) => set({ message })

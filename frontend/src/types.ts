@@ -69,3 +69,26 @@ export type ProjectDetail = ProjectSummary & {
 export type ApiEnvelope<T> = T & {
   ok: boolean;
 };
+
+export type WebTaskLog = {
+  at: string;
+  message: string;
+};
+
+export type WebTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+
+export type WebTask = {
+  id: string;
+  project: string;
+  action: string;
+  label: string;
+  payload: Record<string, unknown>;
+  status: WebTaskStatus;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error?: string | null;
+  fix?: string | null;
+  logs: WebTaskLog[];
+  result?: unknown;
+};

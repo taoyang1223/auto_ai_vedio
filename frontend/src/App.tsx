@@ -22,6 +22,7 @@ import {
   CheckCircle2,
   ChevronRight,
   Clapperboard,
+  Clock,
   Cloud,
   Eye,
   Film,
@@ -33,18 +34,20 @@ import {
   LogOut,
   Play,
   Plus,
+  RefreshCw,
   Save,
   Settings,
   ShieldCheck,
   Sparkles,
+  Terminal,
   UploadCloud,
-  Wand2
+  Wand2,
+  XCircle
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { runProjectAction } from "./api";
 import { useAppStore } from "./store";
-import type { Shot } from "./types";
+import type { Shot, WebTask, WebTaskStatus } from "./types";
 
 type TabKey = "shots" | "workflow" | "run" | "config";
 
@@ -540,15 +543,43 @@ function WorkflowPanel() {
 }
 
 function RunPanel() {
-  const { detail, setMessage } = useAppStore();
+  const { cancelQueuedTask, detail, enqueueTask, loadTask, refreshTasks, setMessage, tasks } = useAppStore();
   const [busy, setBusy] = useState("");
-  const [output, setOutput] = useState("");
+  const [error, setError] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
+
+  useEffect(() => {
+    if (!detail) return;
+    refreshTasks(detail.name).catch((err) => setError(String((err as Error).message || err)));
+    const timer = window.setInterval(() => {
+      refreshTasks(detail.name).catch((err) => setError(String((err as Error).message || err)));
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [detail, refreshTasks]);
+
+  useEffect(() => {
+    if (!selectedTaskId && tasks[0]) {
+      setSelectedTaskId(tasks[0].id);
+    }
+  }, [selectedTaskId, tasks]);
+
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    loadTask(selectedTaskId).catch((err) => setError(String((err as Error).message || err)));
+    const timer = window.setInterval(() => {
+      loadTask(selectedTaskId).catch((err) => setError(String((err as Error).message || err)));
+    }, 1500);
+    return () => window.clearInterval(timer);
+  }, [loadTask, selectedTaskId]);
+
   if (!detail) return null;
   const project = detail;
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) || tasks[0] || null;
 
   const actions = [
     { key: "validate", label: "校验项目", icon: CheckCircle2, payload: {} },
     { key: "jobs-plan", label: "生成计划", icon: Clapperboard, payload: { provider: project.config.default_video_provider, kind: "video" } },
+    { key: "generate", label: "提交生成", icon: Play, payload: { provider: project.config.default_video_provider, kind: "video" } },
     { key: "remote-plan", label: "远程预案", icon: Cloud, payload: { profile: project.remote_profiles_detail[0], provider: "comfyui_wan", kind: "video" } },
     { key: "probe", label: "验片", icon: Eye, payload: { dry_run: false } },
     { key: "assemble-plan", label: "合成预案", icon: Film, payload: {} }
@@ -556,40 +587,211 @@ function RunPanel() {
 
   async function run(action: (typeof actions)[number]) {
     setBusy(action.key);
-    setOutput("执行中...");
+    setError("");
     try {
-      const result = await runProjectAction(project.name, action.key, action.payload);
-      setOutput(JSON.stringify(result, null, 2));
-      setMessage(`${action.label}完成`);
+      const task = await enqueueTask(project.name, action.key, action.payload, action.label);
+      setSelectedTaskId(task.id);
+      setMessage(`${action.label}已加入队列`);
     } catch (error) {
-      setOutput(String((error as Error).message || error));
+      setError(String((error as Error).message || error));
     } finally {
       setBusy("");
     }
   }
 
+  async function refreshNow() {
+    setError("");
+    try {
+      await refreshTasks(project.name);
+      if (selectedTaskId) await loadTask(selectedTaskId);
+    } catch (err) {
+      setError(String((err as Error).message || err));
+    }
+  }
+
+  async function cancelSelected() {
+    if (!selectedTask) return;
+    await cancelQueuedTask(selectedTask.id);
+  }
+
   return (
     <section className="grid grid-cols-[360px_1fr] gap-4 max-xl:grid-cols-1">
-      <div className="panel p-4">
-        <div className="mb-4 flex items-center gap-2 font-semibold">
-          <Activity size={18} />
-          生产动作
+      <div className="grid gap-4">
+        <div className="panel p-4">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 font-semibold">
+              <Activity size={18} />
+              生产动作
+            </div>
+            <button className="btn h-9 px-3" onClick={refreshNow} type="button" title="刷新任务">
+              <RefreshCw size={16} />
+            </button>
+          </div>
+          {error ? <Notice tone="bad" title="任务错误" body={error} /> : null}
+          <div className="grid gap-2">
+            {actions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <button key={action.key} className="btn justify-start" disabled={Boolean(busy)} onClick={() => run(action)} type="button">
+                  {busy === action.key ? <Loader2 className="animate-spin" size={17} /> : <Icon size={17} />}
+                  {action.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="grid gap-2">
-          {actions.map((action) => {
-            const Icon = action.icon;
-            return (
-              <button key={action.key} className="btn justify-start" disabled={Boolean(busy)} onClick={() => run(action)} type="button">
-                {busy === action.key ? <Loader2 className="animate-spin" size={17} /> : <Icon size={17} />}
-                {action.label}
-              </button>
-            );
-          })}
+
+        <div className="panel p-4">
+          <div className="mb-3 flex items-center gap-2 font-semibold">
+            <Clock size={18} />
+            任务队列
+          </div>
+          <div className="grid max-h-[420px] gap-2 overflow-auto pr-1">
+            {tasks.length ? (
+              tasks.map((task) => (
+                <button
+                  key={task.id}
+                  className={`rounded-lg border px-3 py-2 text-left transition ${
+                    selectedTask?.id === task.id ? "border-teal-300 bg-teal-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
+                  onClick={() => setSelectedTaskId(task.id)}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-sm font-medium text-slate-900">{task.label}</span>
+                    <TaskStatusBadge status={task.status} />
+                  </div>
+                  <div className="mt-1 truncate text-xs text-slate-500">
+                    {task.id} · {formatTaskTime(task.created_at)}
+                  </div>
+                </button>
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                暂无任务
+              </div>
+            )}
+          </div>
         </div>
       </div>
-      <pre className="min-h-[460px] overflow-auto rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100">{output || "等待运行结果"}</pre>
+
+      <div className="panel overflow-hidden">
+        {selectedTask ? (
+          <div className="grid gap-0">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <Terminal size={18} className="text-teal-700" />
+                  <h2 className="truncate text-lg font-semibold text-slate-950">{selectedTask.label}</h2>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                  <span>{selectedTask.id}</span>
+                  <span>创建 {formatTaskTime(selectedTask.created_at)}</span>
+                  {selectedTask.finished_at ? <span>完成 {formatTaskTime(selectedTask.finished_at)}</span> : null}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <TaskStatusBadge status={selectedTask.status} />
+                {selectedTask.status === "queued" ? (
+                  <button className="btn h-9 px-3" onClick={cancelSelected} type="button" title="取消任务">
+                    <XCircle size={16} />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {selectedTask.error ? (
+              <div className="border-b border-red-100 bg-red-50 px-5 py-3 text-sm text-red-800">
+                <div className="font-medium">{selectedTask.error}</div>
+                {selectedTask.fix ? <div className="mt-1 whitespace-pre-wrap">{selectedTask.fix}</div> : null}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-[minmax(260px,0.82fr)_1fr] gap-0 max-2xl:grid-cols-1">
+              <div className="border-r border-slate-100 p-5 max-2xl:border-b max-2xl:border-r-0">
+                <div className="mb-3 text-sm font-semibold text-slate-800">执行日志</div>
+                <div className="grid max-h-[520px] gap-2 overflow-auto pr-1">
+                  {selectedTask.logs.length ? (
+                    selectedTask.logs.map((log, index) => (
+                      <div key={`${log.at}-${index}`} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                        <div className="text-xs text-slate-400">{formatTaskTime(log.at)}</div>
+                        <div className="mt-1 whitespace-pre-wrap break-words text-slate-700">{log.message}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">
+                      等待日志
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="p-5">
+                <div className="mb-3 text-sm font-semibold text-slate-800">任务结果</div>
+                <pre className="min-h-[520px] overflow-auto rounded-lg bg-slate-950 p-4 text-sm leading-6 text-slate-100">
+                  {taskResultText(selectedTask)}
+                </pre>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid min-h-[520px] place-items-center text-slate-500">
+            <div className="text-center">
+              <Clock className="mx-auto text-teal-700" size={28} />
+              <div className="mt-3 text-sm">提交一个生产动作后，这里会显示日志和结果</div>
+            </div>
+          </div>
+        )}
+      </div>
     </section>
   );
+}
+
+function TaskStatusBadge({ status }: { status: WebTaskStatus }) {
+  const className = {
+    queued: "border-slate-200 bg-slate-50 text-slate-600",
+    running: "border-blue-200 bg-blue-50 text-blue-700",
+    succeeded: "border-teal-200 bg-teal-50 text-teal-700",
+    failed: "border-red-200 bg-red-50 text-red-700",
+    canceled: "border-amber-200 bg-amber-50 text-amber-700"
+  }[status];
+  const icon = status === "running" ? <Loader2 className="animate-spin" size={13} /> : status === "failed" ? <AlertCircle size={13} /> : null;
+  return (
+    <span className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs ${className}`}>
+      {icon}
+      {taskStatusLabel(status)}
+    </span>
+  );
+}
+
+function taskStatusLabel(status: WebTaskStatus) {
+  return {
+    queued: "排队",
+    running: "运行中",
+    succeeded: "成功",
+    failed: "失败",
+    canceled: "已取消"
+  }[status];
+}
+
+function formatTaskTime(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function taskResultText(task: WebTask) {
+  if (task.result !== undefined && task.result !== null) {
+    return JSON.stringify(task.result, null, 2);
+  }
+  if (task.status === "failed") {
+    return JSON.stringify({ error: task.error, fix: task.fix }, null, 2);
+  }
+  return "任务尚未产生结果";
 }
 
 function ConfigPanel() {
