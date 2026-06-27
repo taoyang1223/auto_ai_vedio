@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .errors import AutoVideoError
+from .continuity import extract_tail_frames
 from .job_store import JobStore
 from .pipeline import generate_images, generate_videos, plan_jobs, submit_jobs
 from .probe import probe_project
@@ -122,6 +123,13 @@ def build_parser() -> argparse.ArgumentParser:
     probe = sub.add_parser("probe")
     probe.add_argument("project")
     probe.add_argument("--dry-run", action="store_true")
+
+    continuity = sub.add_parser("continuity")
+    continuity_sub = continuity.add_subparsers(dest="continuity_command")
+    continuity_extract = continuity_sub.add_parser("extract-tail-frames")
+    continuity_extract.add_argument("project")
+    continuity_extract.add_argument("--dry-run", action="store_true")
+    continuity_extract.add_argument("--force", action="store_true")
 
     jobs = sub.add_parser("jobs")
     jobs_sub = jobs.add_subparsers(dest="jobs_command")
@@ -249,6 +257,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "probe":
             report = probe_project(load_project(args.project), dry_run=args.dry_run)
             print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        if args.command == "continuity" and args.continuity_command == "extract-tail-frames":
+            result = extract_tail_frames(load_project(args.project), dry_run=args.dry_run, force=args.force)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "jobs" and args.jobs_command == "plan":
             result = plan_jobs(

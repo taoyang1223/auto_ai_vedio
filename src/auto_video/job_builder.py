@@ -8,6 +8,7 @@ from .jobs import (
     relative_output_path,
     utc_now_iso,
 )
+from .continuity import continuity_refs_for_shot
 from .models import Project, ShotPlan
 from .project import resolve_project_path
 from .prompts import plan_prompt
@@ -30,6 +31,19 @@ def _select_shots(project: Project, only: set[str] | None = None):
 
 def _provider_refs(project: Project, shot: ShotPlan) -> tuple[ProviderReference, ...]:
     refs: list[ProviderReference] = []
+    for ref in continuity_refs_for_shot(project, shot.id):
+        path = str(ref.get("path", ""))
+        if not path:
+            continue
+        refs.append(
+            ProviderReference(
+                path=path,
+                type=str(ref.get("type", "image")),
+                role=str(ref.get("role", "first_frame")),
+                usage=str(ref.get("usage", "preserve_subject")),
+                exists=resolve_project_path(project.config.root, path).exists(),
+            )
+        )
     for ref in shot.refs:
         refs.append(
             ProviderReference(
