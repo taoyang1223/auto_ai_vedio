@@ -25,6 +25,32 @@ python3 -m venv .venv
 .venv/bin/python -m auto_video probe demo_project --dry-run
 ```
 
+## Project Templates
+
+`init` can scaffold either the small offline demo or a real AutoDL ComfyUI Wan starter:
+
+```bash
+.venv/bin/python -m auto_video init --list-templates
+.venv/bin/python -m auto_video init demo_project --template demo
+.venv/bin/python -m auto_video init wan_story --template autodl_comfyui_wan
+```
+
+The `autodl_comfyui_wan` template creates a three-shot image-to-video project with:
+
+- `comfyui_wan` external-command provider config.
+- An `autodl_5090` remote profile ready for host, port, and workflow path edits.
+- Placeholder first-frame PNGs under `assets/refs/`.
+- A project-local README with the validate, remote run, assemble, and wrap-up commands.
+
+Before running it on a rented GPU, replace the placeholder PNGs with real first-frame images, edit `remote_profiles.autodl_5090` in `project.yaml`, then run:
+
+```bash
+.venv/bin/python -m auto_video validate wan_story
+.venv/bin/python -m auto_video remote run wan_story --profile autodl_5090 --provider comfyui_wan --kind video
+.venv/bin/python -m auto_video continuity extract-tail-frames wan_story
+.venv/bin/python -m auto_video assemble wan_story
+```
+
 ## Design
 
 See `docs/superpowers/specs/2026-06-26-ai-video-cli-pipeline-design.md`.

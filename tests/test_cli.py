@@ -3,6 +3,12 @@ from pathlib import Path
 from auto_video.cli import main
 
 
+def _png_size(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data.startswith(b"\x89PNG\r\n\x1a\n")
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
 def test_cli_help_exits_successfully(capsys):
     code = main(["--help"])
     captured = capsys.readouterr()
@@ -18,6 +24,38 @@ def test_cli_init_creates_project(tmp_path: Path):
     assert (project / "project.yaml").exists()
     assert (project / "shots.json").exists()
     assert (project / "assets" / "refs" / "S01.txt").exists()
+
+
+def test_cli_init_lists_templates(capsys):
+    code = main(["init", "--list-templates"])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "demo" in captured.out
+    assert "autodl_comfyui_wan" in captured.out
+
+
+def test_cli_init_autodl_comfyui_wan_template(tmp_path: Path):
+    project = tmp_path / "wan_project"
+
+    assert main(["init", str(project), "--template", "autodl_comfyui_wan"]) == 0
+
+    assert main(["validate", str(project)]) == 0
+    assert (project / "README.md").exists()
+    assert "comfyui_wan" in (project / "project.yaml").read_text(encoding="utf-8")
+    for shot_id in ("S01", "S02", "S03"):
+        assert _png_size(project / "assets" / "refs" / f"{shot_id}_first_frame.png") == (832, 544)
+
+
+def test_cli_init_rejects_overwrite_without_force(tmp_path: Path):
+    project = tmp_path / "demo"
+
+    assert main(["init", str(project)]) == 0
+    assert main(["init", str(project)]) == 1
+    assert main(["init", str(project), "--force"]) == 0
+
+
+def test_cli_init_rejects_unknown_template(tmp_path: Path):
+    assert main(["init", str(tmp_path / "bad"), "--template", "missing"]) == 1
 
 
 def test_cli_validate_and_dry_run_generation(tmp_path: Path):

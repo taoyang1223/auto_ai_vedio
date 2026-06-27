@@ -16,61 +16,10 @@ from .remote_doctor import RemoteDoctorOptions, run_remote_doctor
 from .remote_profiles import build_remote_run_options_from_profile, list_remote_profiles
 from .remote_transport import run_remote_worker
 from .remote_wrapup import RemoteWrapupOptions, run_remote_wrapup
+from .templates import init_project, list_templates
 from .validation import validate_project
 from .worker_bundle import export_worker_bundle, import_worker_results
 from .worker_runner import run_worker_bundle
-
-
-PROJECT_YAML = """name: demo_ad
-aspect_ratio: "9:16"
-width: 1080
-height: 1920
-fps: 30
-default_video_provider: mock
-default_image_provider: mock
-default_audio_provider: mock
-render:
-  transition:
-    type: fade
-    duration: 0.6
-  bgm_volume: 0.2
-  subtitle_style: default
-  brand:
-    text: "Demo Brand"
-    at: 1.2
-  cta:
-    text: "Click for more"
-    at: 2.6
-"""
-
-SHOTS_JSON = """{
-  "shots": [
-    {
-      "id": "S01",
-      "title": "Hook",
-      "duration": 5,
-      "intent": "Show fatigue and introduce the product need",
-      "provider": "mock",
-      "visual_prompt": "A tired person at a cold desk",
-      "camera_motion": "slow_dolly_in",
-      "environment_motion": "screen flicker, dust floats",
-      "performance": "tired breathing, shoulders drop slightly",
-      "lighting": "cold fluorescent light",
-      "audio_intent": "quiet room tone",
-      "subtitle": "Late night again",
-      "negative_prompt": "text, watermark",
-      "refs": [
-        {
-          "path": "assets/refs/S01.txt",
-          "type": "text",
-          "role": "first_frame",
-          "usage": "preserve_subject"
-        }
-      ]
-    }
-  ]
-}
-"""
 
 
 def _csv(value: str | None) -> set[str] | None:
@@ -79,24 +28,15 @@ def _csv(value: str | None) -> set[str] | None:
     return {item.strip() for item in value.split(",") if item.strip()}
 
 
-def init_project(path: Path) -> None:
-    (path / "assets" / "refs").mkdir(parents=True, exist_ok=True)
-    (path / "generated" / "images").mkdir(parents=True, exist_ok=True)
-    (path / "generated" / "clips").mkdir(parents=True, exist_ok=True)
-    (path / "generated" / "audio").mkdir(parents=True, exist_ok=True)
-    (path / "renders").mkdir(parents=True, exist_ok=True)
-    (path / "reports").mkdir(parents=True, exist_ok=True)
-    (path / "project.yaml").write_text(PROJECT_YAML, encoding="utf-8")
-    (path / "shots.json").write_text(SHOTS_JSON, encoding="utf-8")
-    (path / "assets" / "refs" / "S01.txt").write_text("mock first-frame reference\n", encoding="utf-8")
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="auto-video")
     sub = parser.add_subparsers(dest="command", required=False)
 
     init = sub.add_parser("init")
-    init.add_argument("project")
+    init.add_argument("project", nargs="?")
+    init.add_argument("--template", default="demo")
+    init.add_argument("--list-templates", action="store_true")
+    init.add_argument("--force", action="store_true")
 
     validate = sub.add_parser("validate")
     validate.add_argument("project")
@@ -228,7 +168,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.print_help()
             return 0
         if args.command == "init":
-            init_project(Path(args.project))
+            if args.list_templates:
+                print(json.dumps({"templates": list_templates()}, ensure_ascii=False, indent=2))
+                return 0
+            if not args.project:
+                print("ConfigError: init requires a project path unless --list-templates is set")
+                return 1
+            init_project(Path(args.project), template_name=args.template, force=args.force)
             return 0
         if args.command == "validate":
             validate_project(load_project(args.project))
