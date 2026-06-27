@@ -178,6 +178,8 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--workspace", default="web_projects")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8765)
+    web.add_argument("--token")
+    web.add_argument("--token-env", default="AUTO_VIDEO_WEB_TOKEN")
     return parser
 
 
@@ -368,7 +370,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"profile": args.name, "env": exports}, ensure_ascii=False, indent=2))
             return 0
         if args.command == "web":
-            run_web_server(Path(args.workspace), host=args.host, port=args.port)
+            run_web_server(Path(args.workspace), host=args.host, port=args.port, token=args.token, token_env=args.token_env)
             return 0
         parser.print_help()
         return 2

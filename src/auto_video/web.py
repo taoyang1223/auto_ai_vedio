@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import mimetypes
+import os
 import re
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -25,13 +28,24 @@ from .workflow_registry import list_workflows
 PROJECT_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 STATIC_DIR = Path(__file__).with_name("web_static")
+SESSION_COOKIE = "auto_video_web_session"
+DEFAULT_TOKEN_ENV = "AUTO_VIDEO_WEB_TOKEN"
 
 
-def run_web_server(workspace: Path, *, host: str = "127.0.0.1", port: int = 8765) -> None:
+def run_web_server(
+    workspace: Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    token: str | None = None,
+    token_env: str = DEFAULT_TOKEN_ENV,
+) -> None:
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    server = make_web_server(workspace, host=host, port=port)
+    auth_token = token or os.environ.get(token_env)
+    server = make_web_server(workspace, host=host, port=port, token=auth_token)
     print(f"auto-video web listening on http://{host}:{server.server_port}")
+    print(f"auto-video web auth {'enabled' if auth_token else 'disabled'}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -40,14 +54,22 @@ def run_web_server(workspace: Path, *, host: str = "127.0.0.1", port: int = 8765
         server.server_close()
 
 
-def make_web_server(workspace: Path, *, host: str = "127.0.0.1", port: int = 0) -> ThreadingHTTPServer:
+def make_web_server(
+    workspace: Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    token: str | None = None,
+) -> ThreadingHTTPServer:
     workspace = workspace.resolve()
     workspace.mkdir(parents=True, exist_ok=True)
-    handler = _handler_factory(workspace)
+    handler = _handler_factory(workspace, token=token)
     return ThreadingHTTPServer((host, port), handler)
 
 
-def _handler_factory(workspace: Path):
+def _handler_factory(workspace: Path, *, token: str | None):
+    session_value = _session_value(token) if token else None
+
     class AutoVideoWebHandler(BaseHTTPRequestHandler):
         server_version = "AutoVideoWeb/0.1"
 
@@ -69,9 +91,18 @@ def _handler_factory(workspace: Path):
                 path = parsed.path.rstrip("/") or "/"
                 parts = [unquote(part) for part in path.split("/") if part]
                 if parts[:1] == ["api"]:
+                    if parts[1:2] == ["auth"]:
+                        self._handle_auth(method, parts[2:])
+                        return
+                    if not self._is_authorized():
+                        self._send_unauthorized()
+                        return
                     self._handle_api(method, parts[1:])
                     return
                 if method == "GET" and parts[:1] == ["media"]:
+                    if not self._is_authorized():
+                        self._send_unauthorized()
+                        return
                     self._handle_media(parts[1:])
                     return
                 if method == "GET" and path == "/":
@@ -96,6 +127,53 @@ def _handler_factory(workspace: Path):
                 self._send_json({"ok": False, "error": "invalid JSON", "fix": str(exc)}, status=400)
             except Exception as exc:
                 self._send_json({"ok": False, "error": str(exc), "fix": "Check the request and server log."}, status=500)
+
+        def _handle_auth(self, method: str, parts: list[str]) -> None:
+            if method == "GET" and parts == ["status"]:
+                self._send_json(
+                    {
+                        "ok": True,
+                        "enabled": bool(token),
+                        "authenticated": self._is_authorized(),
+                    }
+                )
+                return
+            if method == "POST" and parts == ["login"]:
+                if not token:
+                    self._send_json({"ok": True, "enabled": False, "authenticated": True})
+                    return
+                payload = self._read_json()
+                candidate = str(payload.get("token") or "")
+                if hmac.compare_digest(candidate, token):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header(
+                        "Set-Cookie",
+                        f"{SESSION_COOKIE}={session_value}; Path=/; HttpOnly; SameSite=Lax",
+                    )
+                    body = json.dumps({"ok": True, "enabled": True, "authenticated": True}).encode("utf-8")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self._send_json(
+                    {"ok": False, "error": "访问口令不正确", "fix": "请检查口令后重试。"},
+                    status=401,
+                )
+                return
+            if method == "POST" and parts == ["logout"]:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header(
+                    "Set-Cookie",
+                    f"{SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+                )
+                body = json.dumps({"ok": True, "authenticated": False}).encode("utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            raise ConfigError("unknown auth API route", fix="Use /api/auth/login or /api/auth/status.")
 
         def _handle_api(self, method: str, parts: list[str]) -> None:
             if method == "GET" and parts == ["templates"]:
@@ -227,6 +305,21 @@ def _handler_factory(workspace: Path):
             self.end_headers()
             self.wfile.write(raw)
 
+        def _send_unauthorized(self) -> None:
+            self._send_json(
+                {"ok": False, "error": "未登录", "fix": "请先输入访问口令。"},
+                status=401,
+            )
+
+        def _is_authorized(self) -> bool:
+            if not token or not session_value:
+                return True
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Bearer ") and hmac.compare_digest(auth.removeprefix("Bearer "), token):
+                return True
+            cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
+            return hmac.compare_digest(cookies.get(SESSION_COOKIE, ""), session_value)
+
         def _send_static(self, relative_path: str) -> bool:
             if not STATIC_DIR.exists():
                 return False
@@ -249,6 +342,20 @@ def _handler_factory(workspace: Path):
             self.wfile.write(body)
 
     return AutoVideoWebHandler
+
+
+def _session_value(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _parse_cookie_header(value: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for item in value.split(";"):
+        if "=" not in item:
+            continue
+        name, raw = item.split("=", 1)
+        result[name.strip()] = raw.strip()
+    return result
 
 
 def _list_projects(workspace: Path) -> list[dict[str, Any]]:

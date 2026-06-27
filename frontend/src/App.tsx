@@ -23,23 +23,24 @@ import {
   ChevronRight,
   Clapperboard,
   Cloud,
-  Code2,
   Eye,
   Film,
   GripVertical,
   ImagePlus,
+  KeyRound,
   LayoutDashboard,
   Loader2,
+  LogOut,
   Play,
   Plus,
-  RefreshCcw,
   Save,
   Settings,
+  ShieldCheck,
   Sparkles,
   UploadCloud,
   Wand2
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { runProjectAction } from "./api";
 import { useAppStore } from "./store";
@@ -68,6 +69,8 @@ function ConsoleShell() {
   const { projectName } = useParams();
   const {
     activeProject,
+    authEnabled,
+    authenticated,
     boot,
     detail,
     loading,
@@ -83,18 +86,29 @@ function ConsoleShell() {
   }, [boot]);
 
   useEffect(() => {
-    if (projectName && projectName !== activeProject) {
+    if (authenticated && projectName && projectName !== activeProject) {
       selectProject(projectName).catch((error) => setBootError(String(error.message || error)));
     }
-  }, [projectName, activeProject, selectProject]);
+  }, [authenticated, projectName, activeProject, selectProject]);
 
   useEffect(() => {
-    if (!projectName && activeProject) {
+    if (authenticated && !projectName && activeProject) {
       navigate(`/projects/${encodeURIComponent(activeProject)}`, { replace: true });
     }
-  }, [activeProject, navigate, projectName]);
+  }, [authenticated, activeProject, navigate, projectName]);
 
   const currentName = projectName || activeProject || "";
+
+  if (authEnabled && !authenticated) {
+    return (
+      <div className="min-h-screen bg-mist text-ink">
+        <TopBar />
+        <main className="grid min-h-[calc(100vh-72px)] place-items-center px-4 py-10">
+          <LoginScreen />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-mist text-ink">
@@ -113,7 +127,7 @@ function ConsoleShell() {
 }
 
 function TopBar() {
-  const { createNewProject, templates } = useAppStore();
+  const { authenticated, authEnabled, createNewProject, logoutSession, templates } = useAppStore();
   const navigate = useNavigate();
   const [name, setName] = useState("new_project");
   const [template, setTemplate] = useState("autodl_comfyui_wan");
@@ -141,6 +155,11 @@ function TopBar() {
     }
   }
 
+  async function handleLogout() {
+    await logoutSession();
+    navigate("/");
+  }
+
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="flex h-[72px] items-center justify-between gap-4 px-6 max-lg:h-auto max-lg:flex-col max-lg:items-stretch max-lg:py-4">
@@ -153,28 +172,94 @@ function TopBar() {
             <div className="truncate text-xs text-slate-500">Auto AI Video 控制台</div>
           </div>
         </Link>
-        <form className="flex items-center gap-2 max-md:flex-wrap" onSubmit={handleCreate}>
-          <input
-            className="control w-48"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            aria-label="项目名称"
-          />
-          <select className="control w-56" value={template} onChange={(event) => setTemplate(event.target.value)}>
-            {templates.map((item) => (
-              <option key={item.name} value={item.name}>
-                {templateLabel(item.name)}
-              </option>
-            ))}
-          </select>
-          <button className="btn btn-primary" disabled={busy} type="submit" title="新建项目">
-            {busy ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
-            新建
-          </button>
-        </form>
+        {authenticated ? (
+          <div className="flex items-center gap-2 max-md:flex-wrap">
+            <form className="flex items-center gap-2 max-md:flex-wrap" onSubmit={handleCreate}>
+              <input
+                className="control w-48"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                aria-label="项目名称"
+              />
+              <select className="control w-56" value={template} onChange={(event) => setTemplate(event.target.value)}>
+                {templates.map((item) => (
+                  <option key={item.name} value={item.name}>
+                    {templateLabel(item.name)}
+                  </option>
+                ))}
+              </select>
+              <button className="btn btn-primary" disabled={busy} type="submit" title="新建项目">
+                {busy ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
+                新建
+              </button>
+            </form>
+            {authEnabled ? (
+              <button className="btn" onClick={handleLogout} type="button" title="退出登录">
+                <LogOut size={17} />
+                退出
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       {error ? <div className="border-t border-red-100 bg-red-50 px-6 py-2 text-sm text-red-700">{error}</div> : null}
     </header>
+  );
+}
+
+function LoginScreen() {
+  const { loginWithToken } = useAppStore();
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await loginWithToken(token);
+    } catch (err) {
+      setError(String((err as Error).message || err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-panel">
+      <div className="grid h-12 w-12 place-items-center rounded-lg bg-teal-50 text-teal-700">
+        <ShieldCheck size={24} />
+      </div>
+      <h1 className="mt-5 text-2xl font-semibold text-slate-950">访问控制台</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        请输入服务启动时配置的访问口令。登录后才能查看项目、上传素材和执行生产动作。
+      </p>
+      <form className="mt-6 grid gap-3" onSubmit={submit}>
+        <label className="grid gap-1">
+          <span className="label">访问口令</span>
+          <div className="relative">
+            <KeyRound className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={17} />
+            <input
+              className="control w-full pl-10"
+              type="password"
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              autoFocus
+            />
+          </div>
+        </label>
+        <button className="btn btn-primary w-full" disabled={busy || !token} type="submit">
+          {busy ? <Loader2 className="animate-spin" size={17} /> : <ShieldCheck size={17} />}
+          登录
+        </button>
+      </form>
+      {error ? (
+        <div className="mt-4 whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </div>
+      ) : null}
+    </section>
   );
 }
 

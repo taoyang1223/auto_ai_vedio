@@ -1,10 +1,13 @@
 import { create } from "zustand";
 import {
   createProject,
+  fetchAuthStatus,
   fetchConfig,
   fetchProject,
   fetchProjects,
   fetchTemplates,
+  login,
+  logout,
   saveConfig,
   saveShots,
   uploadFirstFrame
@@ -20,7 +23,11 @@ type AppState = {
   configText: string;
   loading: boolean;
   message: string;
+  authEnabled: boolean;
+  authenticated: boolean;
   boot: () => Promise<void>;
+  loginWithToken: (token: string) => Promise<void>;
+  logoutSession: () => Promise<void>;
   selectProject: (name: string) => Promise<void>;
   createNewProject: (name: string, template: string) => Promise<void>;
   setShots: (shots: Shot[]) => void;
@@ -40,9 +47,17 @@ export const useAppStore = create<AppState>((set, get) => ({
   configText: "",
   loading: false,
   message: "",
+  authEnabled: false,
+  authenticated: true,
 
   boot: async () => {
     set({ loading: true });
+    const auth = await fetchAuthStatus();
+    set({ authEnabled: auth.enabled, authenticated: auth.authenticated });
+    if (auth.enabled && !auth.authenticated) {
+      set({ loading: false });
+      return;
+    }
     const [templates, projectsPayload] = await Promise.all([fetchTemplates(), fetchProjects()]);
     set({
       templates,
@@ -52,6 +67,30 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     const active = get().activeProject || projectsPayload.projects[0]?.name;
     if (active) await get().selectProject(active);
+  },
+
+  loginWithToken: async (token: string) => {
+    set({ loading: true });
+    try {
+      const auth = await login(token);
+      set({ authEnabled: auth.enabled, authenticated: auth.authenticated });
+      await get().boot();
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  logoutSession: async () => {
+    await logout();
+    set({
+      activeProject: null,
+      authenticated: false,
+      configText: "",
+      detail: null,
+      projects: [],
+      templates: [],
+      workspace: ""
+    });
   },
 
   refreshProjects: async () => {

@@ -2,7 +2,8 @@ import axios from "axios";
 import type { ApiEnvelope, ProjectDetail, ProjectSummary, TemplateInfo } from "./types";
 
 const client = axios.create({
-  headers: { "Content-Type": "application/json" }
+  headers: { "Content-Type": "application/json" },
+  withCredentials: true
 });
 
 client.interceptors.response.use(
@@ -17,6 +18,20 @@ client.interceptors.response.use(
 export async function fetchTemplates(): Promise<TemplateInfo[]> {
   const { data } = await client.get<ApiEnvelope<{ templates: TemplateInfo[] }>>("/api/templates");
   return data.templates;
+}
+
+export async function fetchAuthStatus(): Promise<{ enabled: boolean; authenticated: boolean }> {
+  const { data } = await client.get<ApiEnvelope<{ enabled: boolean; authenticated: boolean }>>("/api/auth/status");
+  return { enabled: data.enabled, authenticated: data.authenticated };
+}
+
+export async function login(token: string): Promise<{ enabled: boolean; authenticated: boolean }> {
+  const { data } = await client.post<ApiEnvelope<{ enabled: boolean; authenticated: boolean }>>("/api/auth/login", { token });
+  return { enabled: data.enabled, authenticated: data.authenticated };
+}
+
+export async function logout(): Promise<void> {
+  await client.post("/api/auth/logout", {});
 }
 
 export async function fetchProjects(): Promise<{ workspace: string; projects: ProjectSummary[] }> {
