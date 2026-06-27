@@ -48,7 +48,7 @@ import {
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { useAppStore } from "./store";
-import type { Shot, WebTask, WebTaskStatus } from "./types";
+import type { ProjectDetail, Shot, WebTask, WebTaskStatus } from "./types";
 
 type TabKey = "shots" | "workflow" | "run" | "config";
 
@@ -78,6 +78,7 @@ function ConsoleShell() {
     boot,
     detail,
     loading,
+    message,
     projects,
     selectProject,
     templates,
@@ -138,6 +139,7 @@ function ConsoleShell() {
         <ProjectSidebar active={currentName} projects={projects} workspace={workspace} />
         <main className="min-w-0 px-6 py-5 max-lg:px-4">
           {bootError ? <Notice tone="bad" title="启动失败" body={bootError} /> : null}
+          {message ? <Notice tone="ok" title="状态" body={message} /> : null}
           {loading && !detail ? <LoadingState /> : null}
           {!loading && !detail ? <EmptyState hasTemplates={templates.length > 0} /> : null}
           {detail ? <ProjectConsole /> : null}
@@ -330,7 +332,7 @@ function ProjectSidebar({ active, projects, workspace }: { active: string; proje
 }
 
 function ProjectConsole() {
-  const { deleteExistingProject, detail, setMessage } = useAppStore();
+  const { deleteExistingProject, detail, setMessage, tasks } = useAppStore();
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>("shots");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -393,6 +395,8 @@ function ProjectConsole() {
           </div>
         </div>
       </section>
+
+      <ProductionStatus detail={project} onSelectTab={setTab} tasks={tasks} />
 
       <nav className="flex flex-wrap gap-2">
         {tabItems.map((item) => {
@@ -477,6 +481,127 @@ function DeleteProjectDialog({
         </div>
       </section>
     </div>
+  );
+}
+
+type ProductionStep = {
+  key: string;
+  label: string;
+  metric: string;
+  status: "done" | "running" | "warn" | "pending";
+  tab: TabKey;
+  icon: typeof Clapperboard;
+};
+
+function ProductionStatus({
+  detail,
+  onSelectTab,
+  tasks
+}: {
+  detail: ProjectDetail;
+  onSelectTab: (tab: TabKey) => void;
+  tasks: WebTask[];
+}) {
+  const steps = productionSteps(detail, tasks);
+  return (
+    <section className="grid grid-cols-5 gap-3 max-2xl:grid-cols-3 max-lg:grid-cols-2 max-sm:grid-cols-1">
+      {steps.map((step) => {
+        const Icon = step.icon;
+        return (
+          <button
+            key={step.key}
+            className="panel min-h-[88px] p-4 text-left transition hover:border-teal-200 hover:bg-teal-50/40"
+            onClick={() => onSelectTab(step.tab)}
+            type="button"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-slate-50 text-teal-700">
+                <Icon size={18} />
+              </div>
+              <ProductionStatusPill status={step.status} />
+            </div>
+            <div className="mt-3 min-w-0">
+              <div className="truncate text-sm font-semibold text-slate-900">{step.label}</div>
+              <div className="mt-1 truncate text-xs text-slate-500">{step.metric}</div>
+            </div>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionStep[] {
+  const totalShots = detail.shots_detail.length;
+  const readyShots = detail.shots_detail.filter((shot) => shot.visual_prompt.trim() && Number(shot.duration) > 0).length;
+  const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
+  const activeTasks = tasks.filter((task) => task.status === "queued" || task.status === "running").length;
+  const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
+  const failedTasks = tasks.filter((task) => task.status === "failed").length;
+  const renderCount = Object.keys(detail.renders || {}).length;
+  return [
+    {
+      key: "shots",
+      label: "分镜内容",
+      metric: `${readyShots}/${totalShots} 已填写`,
+      status: totalShots > 0 && readyShots === totalShots ? "done" : "warn",
+      tab: "shots",
+      icon: Clapperboard
+    },
+    {
+      key: "first_frames",
+      label: "首帧素材",
+      metric: `${firstFrames}/${totalShots} 已关联`,
+      status: totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
+      tab: "shots",
+      icon: ImagePlus
+    },
+    {
+      key: "workflow",
+      label: "工作流",
+      metric: detail.workflows_detail.length ? `${detail.workflows_detail.length} 个可用` : "未配置",
+      status: detail.workflows_detail.length ? "done" : "warn",
+      tab: "workflow",
+      icon: Boxes
+    },
+    {
+      key: "tasks",
+      label: "任务运行",
+      metric: activeTasks ? `${activeTasks} 个进行中` : failedTasks ? `${failedTasks} 个失败` : succeededTasks ? `${succeededTasks} 个完成` : "未提交",
+      status: activeTasks ? "running" : failedTasks ? "warn" : succeededTasks ? "done" : "pending",
+      tab: "run",
+      icon: Activity
+    },
+    {
+      key: "renders",
+      label: "最终成片",
+      metric: renderCount ? `${renderCount} 个结果` : "未生成",
+      status: renderCount ? "done" : "pending",
+      tab: "run",
+      icon: Film
+    }
+  ];
+}
+
+function ProductionStatusPill({ status }: { status: ProductionStep["status"] }) {
+  const className = {
+    done: "border-teal-200 bg-teal-50 text-teal-700",
+    running: "border-blue-200 bg-blue-50 text-blue-700",
+    warn: "border-amber-200 bg-amber-50 text-amber-700",
+    pending: "border-slate-200 bg-slate-50 text-slate-500"
+  }[status];
+  const label = {
+    done: "就绪",
+    running: "进行中",
+    warn: "待处理",
+    pending: "未开始"
+  }[status];
+  const icon = status === "running" ? <Loader2 className="animate-spin" size={13} /> : status === "done" ? <CheckCircle2 size={13} /> : null;
+  return (
+    <span className={`inline-flex h-6 items-center gap-1 rounded-md border px-2 text-xs ${className}`}>
+      {icon}
+      {label}
+    </span>
   );
 }
 
