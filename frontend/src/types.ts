@@ -205,6 +205,7 @@ export type NovelDraftPayload = {
   shot_seconds: number;
   provider?: string;
   analyzer?: "codex" | "rules";
+  auto_plan?: boolean;
 };
 
 export type NovelDraftResult = {
@@ -221,6 +222,8 @@ export type NovelDraftResult = {
     provider: string;
     analyzer?: string;
     analyzer_error?: string;
+    auto_plan?: boolean;
+    plan_rationale?: string;
   };
 };
 

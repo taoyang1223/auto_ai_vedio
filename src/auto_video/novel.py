@@ -94,6 +94,7 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
     shot_count = _target_shot_count(chapter_text, target_seconds, preferred_shot_seconds)
     shot_seconds = round(target_seconds / shot_count, 2)
     provider = str(payload.get("provider") or project.config.default_video_provider).strip()
+    auto_plan = _bool(payload.get("auto_plan"), default=bool(str(payload.get("analyzer") or "").strip()))
 
     store = load_novel_store(project.config.root)
     analysis = analyze_novel_with_codex(
@@ -104,7 +105,19 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
         provider=provider,
         shot_count=shot_count,
         target_minutes=target_minutes,
+        auto_plan=auto_plan,
     )
+    plan_rationale = ""
+    if analysis.data and auto_plan:
+        target_minutes, shot_count, shot_seconds, plan_rationale = _production_plan_from_analysis(
+            analysis.data,
+            fallback_target_minutes=target_minutes,
+            fallback_shot_count=shot_count,
+            fallback_shot_seconds=preferred_shot_seconds,
+        )
+    else:
+        target_seconds = target_minutes * 60
+        shot_seconds = round(target_seconds / shot_count, 2)
     if analysis.data:
         characters = _merge_analyzed_characters(store.get("characters", []), analysis.data.get("characters", []), chapter_text)
         scenes = _merge_analyzed_scenes(store.get("scenes", []), analysis.data.get("scenes", []), chapter_text)
@@ -155,6 +168,8 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
             "provider": provider,
             "analyzer": analysis.source,
             "analyzer_error": analysis.error,
+            "auto_plan": auto_plan,
+            "plan_rationale": plan_rationale,
         },
         "novel": next_store,
     }
@@ -258,10 +273,77 @@ def _bounded_float(value: Any, *, default: float, minimum: float, maximum: float
     return round(result, 2)
 
 
+def _bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "auto", "codex"}
+
+
+def _plan_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        result = default
+    if not math.isfinite(result):
+        result = default
+    return round(max(minimum, min(maximum, result)), 2)
+
+
+def _plan_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        result = int(round(float(value)))
+    except (TypeError, ValueError):
+        result = default
+    return max(minimum, min(maximum, result))
+
+
 def _target_shot_count(text: str, target_seconds: float, preferred_shot_seconds: float) -> int:
     duration_count = math.ceil(target_seconds / preferred_shot_seconds)
     text_count = math.ceil(len(text) / 58)
     return max(1, min(MAX_NOVEL_SHOTS, max(duration_count, text_count)))
+
+
+def _production_plan_from_analysis(
+    analysis: dict[str, Any],
+    *,
+    fallback_target_minutes: float,
+    fallback_shot_count: int,
+    fallback_shot_seconds: float,
+) -> tuple[float, int, float, str]:
+    plan = analysis.get("production_plan") if isinstance(analysis.get("production_plan"), dict) else {}
+    target_minutes = _plan_float(
+        plan.get("target_minutes"),
+        default=fallback_target_minutes,
+        minimum=1,
+        maximum=60,
+    )
+    target_seconds = target_minutes * 60
+    preferred_seconds = _plan_float(
+        plan.get("shot_seconds"),
+        default=fallback_shot_seconds,
+        minimum=4,
+        maximum=30,
+    )
+    planned_shot_count = _plan_int(
+        plan.get("shot_count"),
+        default=fallback_shot_count,
+        minimum=1,
+        maximum=MAX_NOVEL_SHOTS,
+    )
+    derived_seconds = target_seconds / planned_shot_count
+    if derived_seconds < 4 or derived_seconds > 30:
+        planned_shot_count = _plan_int(
+            math.ceil(target_seconds / preferred_seconds),
+            default=fallback_shot_count,
+            minimum=1,
+            maximum=MAX_NOVEL_SHOTS,
+        )
+        derived_seconds = target_seconds / planned_shot_count
+    shot_seconds = round(max(4, min(30, derived_seconds)), 2)
+    rationale = _clean_text(plan.get("rationale"), limit=240)
+    return target_minutes, planned_shot_count, shot_seconds, rationale
 
 
 def _merge_characters(existing: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:

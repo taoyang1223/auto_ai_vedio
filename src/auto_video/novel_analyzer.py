@@ -26,8 +26,19 @@ class NovelAnalysis:
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["characters", "scenes", "beats"],
+    "required": ["production_plan", "characters", "scenes", "beats"],
     "properties": {
+        "production_plan": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["target_minutes", "shot_count", "shot_seconds", "rationale"],
+            "properties": {
+                "target_minutes": {"type": "number", "minimum": 1, "maximum": 60},
+                "shot_count": {"type": "integer", "minimum": 1, "maximum": 180},
+                "shot_seconds": {"type": "number", "minimum": 4, "maximum": 30},
+                "rationale": {"type": "string"},
+            },
+        },
         "characters": {
             "type": "array",
             "maxItems": 40,
@@ -108,6 +119,7 @@ def analyze_novel_with_codex(
     provider: str,
     shot_count: int,
     target_minutes: float,
+    auto_plan: bool = True,
 ) -> NovelAnalysis:
     analyzer_name = (analyzer or os.environ.get("AUTO_VIDEO_NOVEL_ANALYZER") or "").strip().lower()
     if analyzer_name in ANALYZER_OFF:
@@ -128,6 +140,7 @@ def analyze_novel_with_codex(
         provider=provider,
         shot_count=shot_count,
         target_minutes=target_minutes,
+        auto_plan=auto_plan,
     )
 
     try:
@@ -188,6 +201,7 @@ def _analysis_prompt(
     provider: str,
     shot_count: int,
     target_minutes: float,
+    auto_plan: bool,
 ) -> str:
     existing_summary = {
         "characters": existing_store.get("characters", [])[:60],
@@ -197,7 +211,7 @@ def _analysis_prompt(
 你是“原创小说 AI 视频生产”的资深影视策划、分镜师和提示词工程师。请只输出满足 JSON Schema 的 JSON，不要写 Markdown、解释、注释或代码块。
 
 任务：
-1. 从本章小说中抽取真实人物档案、场景档案，并生成 {shot_count} 个按剧情顺序排列的视频分镜 beat。
+1. 从本章小说中抽取真实人物档案、场景档案，并生成按剧情顺序排列的视频分镜 beat。
 2. 人物只包含：有姓名的人、明确持续出现且会影响画面/对白的无名角色。不要把代词、连接词、动作短语、身体部位、镜头描述当成人物。
 3. 场景只包含：真实空间/地点/房间/街道/设施。不要把“他手里”“视野里缓慢聚焦”“冷色月光”这类身体部位、镜头动作、光线风格当成场景。
 4. 如果已有档案里已经存在同名人物或场景，请沿用其身份设定，不要重新发明外形、音色或空间结构。
@@ -206,10 +220,13 @@ def _analysis_prompt(
 7. 每个 beat 的 visual_prompt 要是适合 ComfyUI/Wan 视频生成的关键词式描述：场景、人物、动作、表情、口型/旁白同步、服装适配、镜头、光线都要清楚；避免空泛形容。
 8. 每个 beat 的 speaker 如果是对白，填说话人物；如果是旁白或环境叙事，填“旁白”。
 9. characters 字段填画面中可见人物名，最多 6 个；不要填“他/她/他们”。
+10. production_plan 必须根据本章内容决定：对白密度高、情绪转折多、场景切换多则更长且分镜更多；叙述少、动作单一则更短。target_minutes 范围 1-60，shot_seconds 范围 4-30，shot_count 范围 1-180。
+11. beats 数量必须等于 production_plan.shot_count。每个 beat 应对应一个可生成视频镜头，不要为了凑数复制同一句。
 
-视频目标：
-- 目标时长：{target_minutes:g} 分钟
-- 分镜数：{shot_count}
+视频规划模式：
+- {"Codex 自动判断最终时长与分镜数量" if auto_plan else "参考下方目标，除非明显不合理才微调"}
+- 规则估算参考目标时长：{target_minutes:g} 分钟
+- 规则估算参考分镜数：{shot_count}
 - 视频服务：{provider}
 
 已有长期档案：

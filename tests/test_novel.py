@@ -63,6 +63,12 @@ def test_novel_chapter_draft_uses_codex_analyzer_for_entities_and_prompts(demo_p
         output_path.write_text(
             json.dumps(
                 {
+                    "production_plan": {
+                        "target_minutes": 2,
+                        "shot_count": 4,
+                        "shot_seconds": 30,
+                        "rationale": "本章包含苏醒、身份确认、旧手机线索和经济压力四个节拍，适合 4 个 30 秒镜头。",
+                    },
                     "characters": [
                         {
                             "name": "林砚",
@@ -138,7 +144,13 @@ def test_novel_chapter_draft_uses_codex_analyzer_for_entities_and_prompts(demo_p
     assert calls
     assert "--output-schema" in calls[0][0]
     assert "--sandbox" in calls[0][0]
+    assert "Codex 自动判断最终时长与分镜数量" in calls[0][1]
     assert draft["meta"]["analyzer"] == "codex"
+    assert draft["meta"]["auto_plan"] is True
+    assert draft["meta"]["target_minutes"] == 2
+    assert draft["meta"]["shot_count"] == 4
+    assert draft["chapter"]["duration"] == 120
+    assert "四个节拍" in draft["meta"]["plan_rationale"]
     assert {"旁白", "林砚", "床边女人"}.issubset(names)
     assert "或者" not in names
     assert "他手里" not in scene_names

@@ -905,6 +905,7 @@ type NovelChapterFormDraft = {
   targetMinutes: string;
   shotSeconds: string;
   provider: string;
+  autoPlan: boolean;
 };
 
 const NOVEL_CHAPTER_FORM_PREFIX = "auto-ai-video:novel-chapter-form:";
@@ -941,6 +942,7 @@ function NovelChapterPanel() {
   const [targetMinutes, setTargetMinutes] = useState("20");
   const [shotSeconds, setShotSeconds] = useState("12");
   const [provider, setProvider] = useState("");
+  const [autoPlan, setAutoPlan] = useState(true);
   const [draft, setDraft] = useState<NovelDraftResult | null>(null);
   const [draftApplied, setDraftApplied] = useState(false);
   const [busy, setBusy] = useState("");
@@ -956,6 +958,7 @@ function NovelChapterPanel() {
     setTargetMinutes(savedForm.targetMinutes || "20");
     setShotSeconds(savedForm.shotSeconds || "12");
     setProvider(savedForm.provider || detail.config.default_video_provider);
+    setAutoPlan(savedForm.autoPlan ?? true);
     setDraft(null);
     setDraftApplied(false);
     setError("");
@@ -972,9 +975,10 @@ function NovelChapterPanel() {
       chapterTitle,
       targetMinutes,
       shotSeconds,
-      provider
+      provider,
+      autoPlan
     });
-  }, [detail?.name, chapterText, chapterTitle, targetMinutes, shotSeconds, provider]);
+  }, [detail?.name, chapterText, chapterTitle, targetMinutes, shotSeconds, provider, autoPlan]);
 
   if (!detail) return null;
   const project = detail;
@@ -995,11 +999,14 @@ function NovelChapterPanel() {
         target_minutes: Number(targetMinutes),
         shot_seconds: Number(shotSeconds),
         provider: provider.trim() || project.config.default_video_provider,
-        analyzer: "codex"
+        analyzer: "codex",
+        auto_plan: autoPlan
       });
       setDraft(result);
       setDraftApplied(false);
-      setMessage(`章节草稿已生成：${result.meta.shot_count} 个分镜 · ${novelAnalyzerLabel(result.meta.analyzer)}`);
+      setMessage(
+        `章节草稿已生成：${formatDuration(result.meta.duration)} · ${result.meta.shot_count} 个分镜 · ${novelAnalyzerLabel(result.meta)}`
+      );
     } catch (failure) {
       const message = friendlyError(failure);
       setError(message);
@@ -1085,9 +1092,18 @@ function NovelChapterPanel() {
             <LabeledInput label="章节标题" value={chapterTitle} onChange={setChapterTitle} />
             <LabeledInput label="视频服务" value={provider} onChange={setProvider} />
           </div>
+          <label className="flex items-center gap-2 rounded-lg border border-teal-100 bg-teal-50/70 px-3 py-2 text-sm font-medium text-teal-800">
+            <input
+              className="h-4 w-4 accent-teal-700"
+              type="checkbox"
+              checked={autoPlan}
+              onChange={(event) => setAutoPlan(event.target.checked)}
+            />
+            Codex 自动规划视频时长与分镜数量
+          </label>
           <div className="grid grid-cols-2 gap-3">
-            <LabeledInput label="目标分钟" type="number" value={targetMinutes} onChange={setTargetMinutes} />
-            <LabeledInput label="单镜基准秒" type="number" value={shotSeconds} onChange={setShotSeconds} />
+            <LabeledInput label={autoPlan ? "参考分钟" : "目标分钟"} type="number" disabled={autoPlan} value={targetMinutes} onChange={setTargetMinutes} />
+            <LabeledInput label={autoPlan ? "参考单镜秒" : "单镜基准秒"} type="number" disabled={autoPlan} value={shotSeconds} onChange={setShotSeconds} />
           </div>
           <div className="flex flex-wrap gap-2">
             <button className="btn btn-primary" disabled={busy === "draft" || !chapterText.trim()} onClick={generateDraft} type="button">
@@ -1132,6 +1148,11 @@ function NovelChapterPanel() {
             <MetricCard label="人物档案" value={String(characters.length)} />
             <MetricCard label="场景档案" value={String(scenes.length)} />
           </div>
+          {draft?.meta.plan_rationale ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+              {draft.meta.plan_rationale}
+            </div>
+          ) : null}
         </article>
 
         <div className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">
@@ -1233,9 +1254,11 @@ function genderLabel(value: string) {
   return "旁白/中性";
 }
 
-function novelAnalyzerLabel(value?: string) {
-  if (value === "codex") return "Codex 分析";
-  if (value === "rules_fallback") return "Codex 回退到规则";
+function novelAnalyzerLabel(meta?: NovelDraftResult["meta"]) {
+  const value = meta?.analyzer;
+  const plan = meta?.auto_plan ? "自动规划" : "手动规划";
+  if (value === "codex") return `Codex 分析/${plan}`;
+  if (value === "rules_fallback") return `Codex 回退到规则/${plan}`;
   return "规则分析";
 }
 
@@ -3435,6 +3458,7 @@ function ConfigPanel() {
 }
 
 function LabeledInput({
+  disabled = false,
   label,
   max,
   min,
@@ -3442,6 +3466,7 @@ function LabeledInput({
   type = "text",
   value
 }: {
+  disabled?: boolean;
   label: string;
   max?: number;
   min?: number;
@@ -3452,7 +3477,15 @@ function LabeledInput({
   return (
     <label className="grid gap-1">
       <span className="label">{label}</span>
-      <input className="control w-full" type={type} min={min} max={max} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input
+        className="control w-full disabled:bg-slate-50 disabled:text-slate-400"
+        type={type}
+        min={min}
+        max={max}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </label>
   );
 }
