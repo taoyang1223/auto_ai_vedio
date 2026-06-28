@@ -143,7 +143,9 @@ def test_novel_chapter_draft_uses_codex_analyzer_for_entities_and_prompts(demo_p
 
     assert calls
     assert "--output-schema" in calls[0][0]
-    assert "--sandbox" in calls[0][0]
+    assert calls[0][0][calls[0][0].index("-s") + 1] == "read-only"
+    assert "-a" not in calls[0][0]
+    assert "--ask-for-approval" not in calls[0][0]
     assert "Codex 自动判断最终时长与分镜数量" in calls[0][1]
     assert draft["meta"]["analyzer"] == "codex"
     assert draft["meta"]["auto_plan"] is True
@@ -157,6 +159,121 @@ def test_novel_chapter_draft_uses_codex_analyzer_for_entities_and_prompts(demo_p
     assert scene_names == {"燃烧金钱的病房"}
     assert "future medical room" in draft["shots"][0]["visual_prompt"]
     assert draft["shots"][0]["speaker"] == next(item["id"] for item in draft["characters"] if item["name"] == "床边女人")
+
+
+def test_codex_draft_filters_polluted_existing_novel_store(demo_project_files, monkeypatch):
+    polluted_store = {
+        "schema_version": "0.1",
+        "characters": [
+            {"id": "narrator", "name": "旁白", "gender": "neutral"},
+            {
+                "id": "char_bad",
+                "name": "没有立刻",
+                "gender": "female",
+                "visual_profile": "没有立刻：沉稳体态，长发，金棕识别色，五官、发型和体态在所有章节保持一致",
+                "wardrobe_profile": "没有立刻基础服装：金棕主识别色，固定识别物为细绳腰封",
+                "aliases": ["没有立刻"],
+            },
+            {
+                "id": "char_old",
+                "name": "林舟",
+                "gender": "male",
+                "visual_profile": "林舟：清瘦青年，黑发，墨青长衣",
+                "wardrobe_profile": "林舟基础服装：墨青外袍，旧铜扣",
+                "aliases": ["林舟"],
+            },
+        ],
+        "scenes": [
+            {
+                "id": "scene_bad",
+                "name": "他手里",
+                "style_prompt": "他手里，空间结构、材质、色调在后续章节保持一致",
+                "wardrobe_prompt": "保留角色主识别色",
+            }
+        ],
+        "chapters": [],
+    }
+    (demo_project_files / "novel.json").write_text(json.dumps(polluted_store, ensure_ascii=False), encoding="utf-8")
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_which(command: str):
+        return "/usr/local/bin/codex" if command == "codex" else None
+
+    def fake_run(command, *, cwd, input, capture_output, text, timeout, check):
+        calls.append((list(command), input))
+        output_path = Path(command[command.index("-o") + 1])
+        output_path.write_text(
+            json.dumps(
+                {
+                    "production_plan": {
+                        "target_minutes": 1,
+                        "shot_count": 2,
+                        "shot_seconds": 30,
+                        "rationale": "短章只需要两个关键镜头。",
+                    },
+                    "characters": [
+                        {
+                            "name": "林砚",
+                            "gender": "neutral",
+                            "aliases": ["林砚先生"],
+                            "visual_profile": "林砚：苍白青年，黑发，神情警惕",
+                            "wardrobe_profile": "林砚基础服装：浅色复苏服，旧手机作为识别物",
+                            "voice_profile": "年轻男性，紧绷疑惑",
+                        }
+                    ],
+                    "scenes": [
+                        {
+                            "name": "未来复苏病房",
+                            "style_prompt": "未来复苏病房，复苏床、冬眠舱和生命维持设备固定在床侧",
+                            "lighting": "冷白医疗灯",
+                            "continuity": "复苏床居中，冬眠舱在左侧，设备靠墙",
+                            "wardrobe_prompt": "未来医疗场景服装：病患穿浅色复苏服",
+                        }
+                    ],
+                    "beats": [
+                        {
+                            "summary": "林砚在未来复苏病房醒来。",
+                            "scene": "未来复苏病房",
+                            "speaker": "旁白",
+                            "characters": ["林砚"],
+                            "visual_prompt": "young man waking on recovery bed in futuristic medical room",
+                            "camera_motion": "缓慢推进",
+                            "environment_motion": "仪器灯光轻微闪烁",
+                            "performance": "林砚睁眼，表情从茫然到警惕",
+                            "lighting": "冷白医疗灯",
+                            "audio_intent": "旁白与动作节奏同步",
+                            "wardrobe": "林砚穿浅色复苏服",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("auto_video.novel_analyzer.shutil.which", fake_which)
+    monkeypatch.setattr("auto_video.novel_analyzer.subprocess.run", fake_run)
+
+    draft = draft_novel_chapter(
+        load_project(demo_project_files),
+        {
+            "chapter_text": "林砚醒来后没有立刻说话。床边的女人说：林砚先生，欢迎回来。",
+            "title": "醒来",
+            "provider": "mock",
+            "analyzer": "codex",
+        },
+    )
+
+    names = {item["name"] for item in draft["characters"]}
+    scenes = {item["name"] for item in draft["scenes"]}
+
+    assert "没有立刻" not in names
+    assert "他手里" not in scenes
+    assert '"name": "没有立刻"' not in calls[0][1]
+    assert '"name": "他手里"' not in calls[0][1]
+    assert {"旁白", "林舟", "林砚"}.issubset(names)
+    assert next(item for item in draft["characters"] if item["name"] == "林砚")["gender"] == "male"
 
 
 def test_apply_novel_chapter_writes_identity_assets_and_job_metadata(demo_project_files):

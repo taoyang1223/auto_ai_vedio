@@ -54,6 +54,19 @@ NAME_STOPWORDS = {
     "床边",
     "他手里",
     "她手里",
+    "不是",
+    "也不是去",
+    "或者",
+    "可他",
+    "医院",
+    "没有",
+    "也没有",
+    "没有立刻",
+    "是僵硬地",
+    "上还有一",
+    "还有",
+    "这间",
+    "那间",
 }
 
 SCENE_FALSE_POSITIVES = {
@@ -63,7 +76,53 @@ SCENE_FALSE_POSITIVES = {
     "视野里缓慢聚焦",
     "冷色月光",
     "暖色烛火",
+    "手机背面",
+    "床边的陌生人",
 }
+
+FALSE_CHARACTER_FRAGMENTS = (
+    "不是",
+    "或者",
+    "看见",
+    "安抚",
+    "得近",
+    "哑声",
+    "越",
+    "不知",
+    "自己",
+    "手机",
+    "账单",
+    "医院",
+    "没有",
+    "立刻",
+    "僵硬",
+    "上还",
+    "还有",
+    "这间",
+    "那间",
+    "可他",
+    "可她",
+    "功能",
+    "服务",
+    "屏幕",
+    "费用",
+)
+
+FALSE_SCENE_FRAGMENTS = (
+    "手里",
+    "视野",
+    "背面",
+    "聚焦",
+    "看着",
+    "摸索",
+    "唯一认识的人",
+    "病危通知书",
+    "陌生人",
+    "认识的人",
+    "功能",
+    "服务",
+    "屏幕",
+)
 
 
 def load_novel_store(root: str | Path) -> dict[str, Any]:
@@ -97,10 +156,11 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
     auto_plan = _bool(payload.get("auto_plan"), default=bool(str(payload.get("analyzer") or "").strip()))
 
     store = load_novel_store(project.config.root)
+    analysis_store = _store_for_analysis(store, chapter_text)
     analysis = analyze_novel_with_codex(
         analyzer=str(payload.get("analyzer") or ""),
         chapter_text=chapter_text,
-        existing_store=store,
+        existing_store=analysis_store,
         project_root=Path(project.config.root),
         provider=provider,
         shot_count=shot_count,
@@ -123,8 +183,8 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
         scenes = _merge_analyzed_scenes(store.get("scenes", []), analysis.data.get("scenes", []), chapter_text)
         beats = _beats_from_analysis(analysis.data, chapter_text, shot_count)
     else:
-        characters = _merge_characters(store.get("characters", []), chapter_text)
-        scenes = _merge_scenes(store.get("scenes", []), chapter_text)
+        characters = _merge_characters(analysis_store.get("characters", []), chapter_text)
+        scenes = _merge_scenes(analysis_store.get("scenes", []), chapter_text)
         beats = _beats_for_count(chapter_text, shot_count)
     shots = [
         _shot_payload(
@@ -223,6 +283,22 @@ def _empty_store() -> dict[str, Any]:
 
 def _clean_list(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in value] if isinstance(value, list) else []
+
+
+def _store_for_analysis(store: dict[str, Any], text: str) -> dict[str, Any]:
+    return {
+        **store,
+        "characters": [
+            dict(item)
+            for item in store.get("characters", [])
+            if isinstance(item, dict) and _is_valid_existing_character(dict(item), text)
+        ],
+        "scenes": [
+            dict(item)
+            for item in store.get("scenes", [])
+            if isinstance(item, dict) and _is_valid_existing_scene(dict(item), text)
+        ],
+    }
 
 
 def _clean_text(value: Any, *, limit: int = 240) -> str:
@@ -359,7 +435,11 @@ def _merge_characters(existing: list[dict[str, Any]], text: str) -> list[dict[st
 
 
 def _merge_analyzed_characters(existing: list[dict[str, Any]], analyzed: Any, text: str) -> list[dict[str, Any]]:
-    by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
+    by_name = {
+        str(item.get("name")): _sanitize_existing_character(dict(item), text)
+        for item in existing
+        if item.get("name") and _is_valid_existing_character(dict(item), text)
+    }
     if NARRATOR_NAME not in by_name:
         by_name[NARRATOR_NAME] = _character_payload(NARRATOR_NAME, len(by_name), gender="neutral", character_id=NARRATOR_ID)
     if isinstance(analyzed, list):
@@ -369,9 +449,12 @@ def _merge_analyzed_characters(existing: list[dict[str, Any]], analyzed: Any, te
             name = _clean_entity_name(item.get("name"))
             if not _is_valid_analyzed_character_name(name):
                 continue
+            analyzed_gender = _normalize_gender(item.get("gender"))
+            inferred_gender = _infer_gender(name, text)
+            gender = inferred_gender if analyzed_gender == "neutral" and inferred_gender != "neutral" else analyzed_gender or inferred_gender
             if name in by_name:
+                by_name[name] = _merge_character_update(by_name[name], item, gender)
                 continue
-            gender = _normalize_gender(item.get("gender")) or _infer_gender(name, text)
             payload = _character_payload(name, len(by_name), gender=gender)
             for key in ("visual_profile", "wardrobe_profile", "voice_profile"):
                 value = _clean_text(item.get(key), limit=420)
@@ -384,6 +467,41 @@ def _merge_analyzed_characters(existing: list[dict[str, Any]], analyzed: Any, te
     if len(by_name) <= 1:
         return _merge_characters(existing, text)
     return [_normalize_character(item, index) for index, item in enumerate(by_name.values())]
+
+
+def _sanitize_existing_character(item: dict[str, Any], text: str) -> dict[str, Any]:
+    name = _clean_entity_name(item.get("name"))
+    inferred_gender = _infer_gender(name, text)
+    if inferred_gender != "neutral" and _normalize_gender(item.get("gender")) in {"", "neutral"}:
+        item["gender"] = inferred_gender
+        item["voice"] = _voice_for_gender(inferred_gender, 0)
+        item["voice_profile"] = item.get("voice_profile") or _voice_profile(0, inferred_gender)
+    return item
+
+
+def _merge_character_update(existing: dict[str, Any], analyzed: dict[str, Any], gender: str) -> dict[str, Any]:
+    updated = dict(existing)
+    if gender != "neutral" and _normalize_gender(updated.get("gender")) in {"", "neutral"}:
+        updated["gender"] = gender
+        updated["voice"] = _voice_for_gender(gender, 0)
+    rule_generated = _looks_rule_generated_profile(
+        _clean_entity_name(updated.get("name")),
+        f"{updated.get('visual_profile', '')} {updated.get('wardrobe_profile', '')}",
+    )
+    for key in ("visual_profile", "wardrobe_profile", "voice_profile"):
+        value = _clean_text(analyzed.get(key), limit=420)
+        if value and (rule_generated or not updated.get(key)):
+            updated[key] = value
+    aliases = updated.get("aliases") if isinstance(updated.get("aliases"), list) else []
+    analyzed_aliases = (
+        [_clean_entity_name(alias) for alias in analyzed.get("aliases", [])]
+        if isinstance(analyzed.get("aliases"), list)
+        else []
+    )
+    updated["aliases"] = _dedupe(
+        [_clean_entity_name(updated.get("name")), *[_clean_entity_name(alias) for alias in aliases], *analyzed_aliases]
+    )
+    return updated
 
 
 def _candidate_names(text: str) -> list[str]:
@@ -414,13 +532,45 @@ def _is_valid_analyzed_character_name(value: str) -> bool:
         return False
     if value in NAME_STOPWORDS or value in SCENE_FALSE_POSITIVES:
         return False
-    if re.search(r"(或者|然后|于是|突然|终于|只是|视野|手里|眼神|声音|时候|这里|那里)", value):
+    if any(fragment in value for fragment in FALSE_CHARACTER_FRAGMENTS):
+        return False
+    if re.search(
+        r"(或者|然后|于是|突然|终于|只是|没有|不是|僵硬|看向|周围|上还|还有|这间|那间|视野|手里|眼神|声音|时候|这里|那里)",
+        value,
+    ):
         return False
     return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]", value))
 
 
+def _is_valid_existing_character(item: dict[str, Any], text: str) -> bool:
+    if item.get("id") == NARRATOR_ID or item.get("name") == NARRATOR_NAME:
+        return True
+    name = _clean_entity_name(item.get("name"))
+    if not _is_valid_analyzed_character_name(name):
+        return False
+    aliases = item.get("aliases") if isinstance(item.get("aliases"), list) else []
+    keys = [name, *[_clean_entity_name(alias) for alias in aliases]]
+    if any(key and key in text for key in keys):
+        return True
+    profile = f"{item.get('visual_profile', '')} {item.get('wardrobe_profile', '')}"
+    return not _looks_rule_generated_profile(name, profile)
+
+
+def _looks_rule_generated_profile(name: str, profile: str) -> bool:
+    return (
+        f"{name}：" in profile
+        and "识别色" in profile
+        and "五官、发型和体态在所有章节保持一致" in profile
+        and "固定识别物为" in profile
+    )
+
+
 def _infer_gender(name: str, text: str) -> str:
     window = _near_text(name, text)
+    if re.search(re.escape(name) + r"(?:先生|公子|少爷|男子|男士)", window):
+        return "male"
+    if re.search(re.escape(name) + r"(?:小姐|女士|姑娘|夫人|女子|少女)", window):
+        return "female"
     if re.search(r"她|姑娘|小姐|女子|少女|夫人|女", window):
         return "female"
     if re.search(r"他|公子|先生|男子|少年|男", window):
@@ -495,6 +645,11 @@ def _voice_profile(index: int, gender: str) -> str:
     return f"{gender} voice, {tone} tone, consistent timbre across chapters"
 
 
+def _voice_for_gender(gender: str, index: int) -> str:
+    voice_pool = FEMALE_VOICES if gender == "female" else MALE_VOICES if gender == "male" else NEUTRAL_VOICES
+    return voice_pool[index % len(voice_pool)]
+
+
 def _merge_scenes(existing: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
     by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
     for name in _candidate_scenes(text):
@@ -506,7 +661,11 @@ def _merge_scenes(existing: list[dict[str, Any]], text: str) -> list[dict[str, A
 
 
 def _merge_analyzed_scenes(existing: list[dict[str, Any]], analyzed: Any, text: str) -> list[dict[str, Any]]:
-    by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
+    by_name = {
+        str(item.get("name")): dict(item)
+        for item in existing
+        if item.get("name") and _is_valid_existing_scene(dict(item), text)
+    }
     if isinstance(analyzed, list):
         for item in analyzed:
             if not isinstance(item, dict):
@@ -532,9 +691,32 @@ def _is_valid_analyzed_scene_name(value: str) -> bool:
         return False
     if value in NAME_STOPWORDS or value in SCENE_FALSE_POSITIVES:
         return False
-    if re.search(r"(或者|然后|于是|看着|摸索|聚焦|眼神|声音|手里|视野|温柔|冷色月光|暖色烛火)$", value):
+    if any(fragment in value for fragment in FALSE_SCENE_FRAGMENTS):
+        return False
+    if re.search(
+        r"(或者|然后|于是|看着|摸索|聚焦|眼神|声音|手里|视野|温柔|认识的人|陌生人|手机|背面|屏幕|功能|服务|冷色月光|暖色烛火)$",
+        value,
+    ):
         return False
     return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]", value))
+
+
+def _is_valid_existing_scene(item: dict[str, Any], text: str) -> bool:
+    name = _clean_entity_name(item.get("name"))
+    if not _is_valid_analyzed_scene_name(name):
+        return False
+    if name in text:
+        return True
+    style = f"{item.get('style_prompt', '')} {item.get('wardrobe_prompt', '')}"
+    return not _looks_rule_generated_scene(name, style)
+
+
+def _looks_rule_generated_scene(name: str, style: str) -> bool:
+    return (
+        name in style
+        and "空间结构、材质、色调在后续章节保持一致" in style
+        and "保留角色主识别色" in style
+    )
 
 
 def _candidate_scenes(text: str) -> list[str]:

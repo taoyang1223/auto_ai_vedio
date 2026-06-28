@@ -1153,6 +1153,11 @@ function NovelChapterPanel() {
               {draft.meta.plan_rationale}
             </div>
           ) : null}
+          {draft?.meta.analyzer_error ? (
+            <div className="mt-3 whitespace-pre-wrap rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+              Codex 分析未成功，已回退规则：{draft.meta.analyzer_error}
+            </div>
+          ) : null}
         </article>
 
         <div className="grid grid-cols-2 gap-4 max-xl:grid-cols-1">

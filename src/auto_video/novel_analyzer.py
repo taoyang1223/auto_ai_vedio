@@ -154,10 +154,8 @@ def analyze_novel_with_codex(
                 "exec",
                 "--ephemeral",
                 "--skip-git-repo-check",
-                "--sandbox",
+                "-s",
                 "read-only",
-                "--ask-for-approval",
-                "never",
                 "-C",
                 project_root.as_posix(),
                 "--output-schema",
@@ -177,17 +175,20 @@ def analyze_novel_with_codex(
                 timeout=timeout,
                 check=False,
             )
+            raw = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
+            try:
+                data = _parse_json_object(raw) if raw.strip() else {}
+            except (json.JSONDecodeError, ValueError):
+                data = {}
+            if _has_useful_analysis(data):
+                return NovelAnalysis(data=data, source="codex")
             if completed.returncode != 0:
                 return NovelAnalysis(
                     data=None,
                     source="rules_fallback",
                     error=_snippet(completed.stderr or completed.stdout or f"codex exited {completed.returncode}"),
                 )
-            raw = output_path.read_text(encoding="utf-8") if output_path.exists() else completed.stdout
-            data = _parse_json_object(raw)
-            if not _has_useful_analysis(data):
-                return NovelAnalysis(data=None, source="rules_fallback", error="codex returned empty analysis")
-            return NovelAnalysis(data=data, source="codex")
+            return NovelAnalysis(data=None, source="rules_fallback", error="codex returned empty analysis")
     except subprocess.TimeoutExpired:
         return NovelAnalysis(data=None, source="rules_fallback", error=f"codex timed out after {timeout} seconds")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -268,6 +269,13 @@ def _int_env(name: str, default: int) -> int:
 
 def _snippet(value: str, limit: int = 500) -> str:
     stripped = value.strip()
+    error_lines = [
+        line.strip()
+        for line in stripped.splitlines()
+        if "ERROR:" in line or line.lower().startswith("error:")
+    ]
+    if error_lines:
+        stripped = "\n".join(error_lines[-3:])
     if len(stripped) <= limit:
         return stripped
-    return stripped[: limit - 3] + "..."
+    return "..." + stripped[-(limit - 3) :]
