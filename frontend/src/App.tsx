@@ -48,7 +48,7 @@ import {
   Wand2,
   XCircle
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { checkComfyWorkflow, fetchAssets, uploadAsset } from "./api";
 import { useAppStore } from "./store";
@@ -164,7 +164,7 @@ function ConsoleShell() {
         <ProjectSidebar active={currentName} projects={projects} workspace={workspace} />
         <main className="min-w-0 px-6 py-5 max-lg:px-4">
           {bootError ? <Notice tone="bad" title="启动失败" body={bootError} /> : null}
-          {message ? <Notice tone="ok" title="状态" body={message} /> : null}
+          {message ? <Notice tone={noticeTone(message)} title="状态" body={message} /> : null}
           {loading && !detail ? <LoadingState /> : null}
           {!loading && !detail ? <EmptyState hasTemplates={templates.length > 0} /> : null}
           {detail ? <ProjectConsole /> : null}
@@ -756,7 +756,7 @@ function ScriptStoryboardPanel() {
 
   useEffect(() => {
     if (!detail) return;
-    setShotCount(String(detail.shots_detail.length || 3));
+    setShotCount(String(Math.min(12, Math.max(1, detail.shots_detail.length || 3))));
     setDuration(String(detail.shots_detail[0]?.duration || 4));
     setProvider(detail.config.default_video_provider);
     setScript(defaultScriptFromProject(detail));
@@ -821,7 +821,7 @@ function ScriptStoryboardPanel() {
             />
           </label>
           <div className="grid grid-cols-3 gap-3 max-md:grid-cols-1">
-            <LabeledInput label="分镜数量" type="number" value={shotCount} onChange={setShotCount} />
+            <LabeledInput label="分镜数量" type="number" min={1} max={12} value={shotCount} onChange={setShotCount} />
             <LabeledInput label="单镜时长" type="number" value={duration} onChange={setDuration} />
             <LabeledInput label="生成服务" value={provider} onChange={setProvider} />
           </div>
@@ -899,6 +899,41 @@ function defaultScriptFromProject(detail: ProjectDetail) {
     .join("。");
 }
 
+type NovelChapterFormDraft = {
+  chapterText: string;
+  chapterTitle: string;
+  targetMinutes: string;
+  shotSeconds: string;
+  provider: string;
+};
+
+const NOVEL_CHAPTER_FORM_PREFIX = "auto-ai-video:novel-chapter-form:";
+
+function novelChapterFormKey(projectName: string) {
+  return `${NOVEL_CHAPTER_FORM_PREFIX}${projectName}`;
+}
+
+function readNovelChapterForm(projectName: string): Partial<NovelChapterFormDraft> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(novelChapterFormKey(projectName));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Partial<NovelChapterFormDraft>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeNovelChapterForm(projectName: string, value: NovelChapterFormDraft) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(novelChapterFormKey(projectName), JSON.stringify(value));
+  } catch {
+    // localStorage can be unavailable in strict privacy modes; the in-memory form still works.
+  }
+}
+
 function NovelChapterPanel() {
   const { applyNovel, detail, draftNovel, enqueueTask, novel, setMessage } = useAppStore();
   const [chapterText, setChapterText] = useState("");
@@ -909,14 +944,35 @@ function NovelChapterPanel() {
   const [draft, setDraft] = useState<NovelDraftResult | null>(null);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const skipFormSave = useRef<string | null>(null);
 
   useEffect(() => {
     if (!detail) return;
-    setChapterTitle(`第${(novel?.chapters.length || 0) + 1}章`);
-    setProvider(detail.config.default_video_provider);
+    const savedForm = readNovelChapterForm(detail.name);
+    skipFormSave.current = detail.name;
+    setChapterText(savedForm.chapterText || "");
+    setChapterTitle(savedForm.chapterTitle || `第${(novel?.chapters.length || 0) + 1}章`);
+    setTargetMinutes(savedForm.targetMinutes || "20");
+    setShotSeconds(savedForm.shotSeconds || "12");
+    setProvider(savedForm.provider || detail.config.default_video_provider);
     setDraft(null);
     setError("");
   }, [detail?.name]);
+
+  useEffect(() => {
+    if (!detail) return;
+    if (skipFormSave.current === detail.name) {
+      skipFormSave.current = null;
+      return;
+    }
+    writeNovelChapterForm(detail.name, {
+      chapterText,
+      chapterTitle,
+      targetMinutes,
+      shotSeconds,
+      provider
+    });
+  }, [detail?.name, chapterText, chapterTitle, targetMinutes, shotSeconds, provider]);
 
   if (!detail) return null;
   const project = detail;
@@ -956,7 +1012,6 @@ function NovelChapterPanel() {
     try {
       await applyNovel(draft);
       setMessage("小说章节已应用，人物、场景和音色档案已保存");
-      setChapterText("");
       setDraft(null);
     } catch (failure) {
       const message = friendlyError(failure);
@@ -984,7 +1039,6 @@ function NovelChapterPanel() {
         "小说章节完整生产"
       );
       setMessage("小说章节已应用，并加入完整生产队列");
-      setChapterText("");
       setDraft(null);
     } catch (failure) {
       const message = friendlyError(failure);
@@ -3322,6 +3376,12 @@ function friendlyError(error: unknown) {
   return message;
 }
 
+function noticeTone(message: string): "bad" | "ok" {
+  return /失败|错误|不能为空|超出范围|不存在|缺失|过长|无效|未找到|请填写|missing|not found|invalid|error/i.test(message)
+    ? "bad"
+    : "ok";
+}
+
 function ConfigPanel() {
   const { configText, persistConfig, setMessage } = useAppStore();
   const [text, setText] = useState(configText);
@@ -3360,11 +3420,15 @@ function ConfigPanel() {
 
 function LabeledInput({
   label,
+  max,
+  min,
   onChange,
   type = "text",
   value
 }: {
   label: string;
+  max?: number;
+  min?: number;
   onChange: (value: string) => void;
   type?: string;
   value: string;
@@ -3372,7 +3436,7 @@ function LabeledInput({
   return (
     <label className="grid gap-1">
       <span className="label">{label}</span>
-      <input className="control w-full" type={type} value={value} onChange={(event) => onChange(event.target.value)} />
+      <input className="control w-full" type={type} min={min} max={max} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
