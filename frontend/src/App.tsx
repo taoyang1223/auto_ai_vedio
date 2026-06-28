@@ -942,6 +942,7 @@ function NovelChapterPanel() {
   const [shotSeconds, setShotSeconds] = useState("12");
   const [provider, setProvider] = useState("");
   const [draft, setDraft] = useState<NovelDraftResult | null>(null);
+  const [draftApplied, setDraftApplied] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const skipFormSave = useRef<string | null>(null);
@@ -956,6 +957,7 @@ function NovelChapterPanel() {
     setShotSeconds(savedForm.shotSeconds || "12");
     setProvider(savedForm.provider || detail.config.default_video_provider);
     setDraft(null);
+    setDraftApplied(false);
     setError("");
   }, [detail?.name]);
 
@@ -995,6 +997,7 @@ function NovelChapterPanel() {
         provider: provider.trim() || project.config.default_video_provider
       });
       setDraft(result);
+      setDraftApplied(false);
       setMessage(`章节草稿已生成：${result.meta.shot_count} 个分镜`);
     } catch (failure) {
       const message = friendlyError(failure);
@@ -1006,13 +1009,13 @@ function NovelChapterPanel() {
   }
 
   async function applyDraft() {
-    if (!draft) return;
+    if (!draft || draftApplied) return;
     setBusy("apply");
     setError("");
     try {
       await applyNovel(draft);
       setMessage("小说章节已应用，人物、场景和音色档案已保存");
-      setDraft(null);
+      setDraftApplied(true);
     } catch (failure) {
       const message = friendlyError(failure);
       setError(message);
@@ -1027,7 +1030,10 @@ function NovelChapterPanel() {
     setBusy("produce");
     setError("");
     try {
-      await applyNovel(draft);
+      if (!draftApplied) {
+        await applyNovel(draft);
+        setDraftApplied(true);
+      }
       await enqueueTask(
         project.name,
         "produce-all",
@@ -1038,8 +1044,7 @@ function NovelChapterPanel() {
         },
         "小说章节完整生产"
       );
-      setMessage("小说章节已应用，并加入完整生产队列");
-      setDraft(null);
+      setMessage(draftApplied ? "小说章节已加入完整生产队列" : "小说章节已应用，并加入完整生产队列");
     } catch (failure) {
       const message = friendlyError(failure);
       setError(message);
@@ -1063,8 +1068,12 @@ function NovelChapterPanel() {
             </div>
           </div>
           {draft ? (
-            <span className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
-              草稿待应用
+            <span
+              className={`rounded-md border px-2 py-1 text-xs font-medium ${
+                draftApplied ? "border-teal-200 bg-teal-50 text-teal-700" : "border-blue-200 bg-blue-50 text-blue-700"
+              }`}
+            >
+              {draftApplied ? "草稿已应用" : "草稿待应用"}
             </span>
           ) : null}
         </div>
@@ -1084,13 +1093,13 @@ function NovelChapterPanel() {
               {busy === "draft" ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
               生成章节草稿
             </button>
-            <button className="btn" disabled={busy === "apply" || !draft} onClick={applyDraft} type="button">
+            <button className="btn" disabled={busy === "apply" || !draft || draftApplied} onClick={applyDraft} type="button">
               {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
-              应用为项目分镜
+              {draftApplied ? "已应用为项目分镜" : "应用为项目分镜"}
             </button>
             <button className="btn" disabled={busy === "produce" || !draft} onClick={applyDraftAndProduce} type="button">
               {busy === "produce" ? <Loader2 className="animate-spin" size={17} /> : <Play size={17} />}
-              应用并开始生产
+              {draftApplied ? "开始生产" : "应用并开始生产"}
             </button>
           </div>
           {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
@@ -1110,9 +1119,9 @@ function NovelChapterPanel() {
               </div>
             </div>
             {draft ? (
-              <button className="btn btn-primary" disabled={busy === "apply"} onClick={applyDraft} type="button">
+              <button className="btn btn-primary" disabled={busy === "apply" || draftApplied} onClick={applyDraft} type="button">
                 {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
-                应用草稿
+                {draftApplied ? "草稿已应用" : "应用草稿"}
               </button>
             ) : null}
           </div>
