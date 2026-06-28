@@ -271,6 +271,50 @@ export type WebTaskLog = {
 
 export type WebTaskStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
 
+export type WebTaskProgressStep = {
+  key: string;
+  label: string;
+  completed: number;
+  total: number;
+  percent: number;
+  status: "done" | "running" | "failed" | "pending" | string;
+  tab?: string | null;
+};
+
+export type WebTaskMedia = {
+  kind: "video" | "audio" | "lipsync" | "final" | string;
+  shot_id?: string | null;
+  title: string;
+  path: string;
+  bytes?: number;
+  updated_at?: number;
+};
+
+export type WebTaskProgress = {
+  available: boolean;
+  kind?: string;
+  status?: WebTaskStatus | string;
+  current_module?: string | null;
+  current_label?: string;
+  current_item?: {
+    shot_id: string;
+    index: number;
+    total: number;
+  } | null;
+  percent?: number;
+  steps?: WebTaskProgressStep[];
+  media?: WebTaskMedia[];
+  remote?: Record<string, unknown>;
+  pause?: {
+    requested: boolean;
+    available: boolean;
+    mode: "instant" | "soft" | "none" | string;
+    label: string;
+  };
+  error?: string;
+  fix?: string;
+};
+
 export type WebTask = {
   id: string;
   project: string;
@@ -283,7 +327,9 @@ export type WebTask = {
   finished_at?: string | null;
   error?: string | null;
   fix?: string | null;
+  cancel_requested?: boolean;
   logs: WebTaskLog[];
+  progress?: WebTaskProgress;
   result?: unknown;
 };
 

@@ -843,7 +843,12 @@ def test_web_task_one_click_production_runs_mock_pipeline(tmp_path):
         task = wait_task(base_url, queued["id"])
 
     steps = [step["step"] for step in task["result"]["steps"]]
+    progress_steps = {step["key"]: step for step in task["progress"]["steps"]}
+    assert queued["progress"]["available"] is True
     assert task["status"] == "succeeded"
+    assert task["progress"]["available"] is True
+    assert task["progress"]["percent"] == 100
+    assert progress_steps["videos"]["status"] == "done"
     assert steps == ["validate", "first_frames", "videos", "voiceover", "lipsync", "probe", "assemble", "continuity"]
     assert task["result"]["steps"][2]["result"]["count"] == 1
     assert task["result"]["steps"][4]["result"]["count"] == 1

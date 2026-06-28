@@ -27,14 +27,17 @@ import {
   Cloud,
   Copy,
   Eye,
+  ExternalLink,
   Film,
   GripVertical,
   ImagePlus,
   KeyRound,
   LayoutDashboard,
+  ListVideo,
   Loader2,
   LogOut,
   Mic2,
+  PauseCircle,
   Play,
   Plus,
   RefreshCw,
@@ -64,6 +67,7 @@ import type {
   Shot,
   RemoteProfileSummary,
   WebTask,
+  WebTaskMedia,
   WebTaskStatus,
   WorkflowSummary
 } from "./types";
@@ -357,12 +361,22 @@ function ProjectSidebar({ active, projects, workspace }: { active: string; proje
 }
 
 function ProjectConsole() {
-  const { deleteExistingProject, detail, setMessage, tasks } = useAppStore();
+  const { deleteExistingProject, detail, refreshTasks, setMessage, tasks } = useAppStore();
   const navigate = useNavigate();
   const [tab, setTab] = useState<TabKey>("novel");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!detail) return;
+    refreshTasks(detail.name).catch(() => undefined);
+    const timer = window.setInterval(() => {
+      refreshTasks(detail.name).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [detail, refreshTasks]);
+
   if (!detail) return null;
   const project = detail;
 
@@ -422,6 +436,7 @@ function ProjectConsole() {
       </section>
 
       <ProductionStatus detail={project} onSelectTab={setTab} tasks={tasks} />
+      <ActiveProductionProgress detail={project} onSelectTab={setTab} tasks={tasks} />
       <FinalRenderPreview detail={project} />
 
       <nav className="flex flex-wrap gap-2">
@@ -591,6 +606,7 @@ type ProductionStep = {
   status: "done" | "running" | "warn" | "pending";
   tab: TabKey;
   icon: typeof Clapperboard;
+  percent?: number;
 };
 
 function ProductionStatus({
@@ -624,6 +640,14 @@ function ProductionStatus({
               <div className="truncate text-sm font-semibold text-slate-900">{step.label}</div>
               <div className="mt-1 truncate text-xs text-slate-500">{step.metric}</div>
             </div>
+            {typeof step.percent === "number" ? (
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full ${step.status === "running" ? "bg-blue-500" : step.status === "done" ? "bg-teal-500" : "bg-amber-400"}`}
+                  style={{ width: `${Math.max(0, Math.min(step.percent, 100))}%` }}
+                />
+              </div>
+            ) : null}
           </button>
         );
       })}
@@ -632,6 +656,9 @@ function ProductionStatus({
 }
 
 function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionStep[] {
+  const activeTask = activeProductionTask(tasks);
+  const progressSteps = activeTask?.progress?.steps || [];
+  const progressByKey = new Map(progressSteps.map((step) => [step.key, step]));
   const totalShots = detail.shots_detail.length;
   const readyShots = detail.shots_detail.filter((shot) => shot.visual_prompt.trim() && Number(shot.duration) > 0).length;
   const firstFrames = detail.shots_detail.filter((shot) => Boolean(firstFrameRef(shot))).length;
@@ -646,6 +673,14 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
   const succeededTasks = tasks.filter((task) => task.status === "succeeded").length;
   const failedTasks = tasks.filter((task) => task.status === "failed").length;
   const renderCount = Object.keys(detail.renders || {}).length;
+  const firstFrameProgress = progressByKey.get("first_frames");
+  const videoProgress = progressByKey.get("videos");
+  const voiceProgress = progressByKey.get("voiceover");
+  const lipsyncProgress = progressByKey.get("lipsync");
+  const renderProgress = progressByKey.get("assemble");
+  const activeProgressText = activeTask?.progress?.current_label
+    ? `${activeTask.progress.current_label}${typeof activeTask.progress.percent === "number" ? ` · ${activeTask.progress.percent}%` : ""}`
+    : "";
   return [
     {
       key: "shots",
@@ -658,10 +693,11 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
     {
       key: "first_frames",
       label: "首帧素材",
-      metric: `${firstFrames}/${totalShots} 已关联`,
-      status: totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
+      metric: firstFrameProgress ? `${firstFrameProgress.completed}/${firstFrameProgress.total} · ${firstFrameProgress.percent}%` : `${firstFrames}/${totalShots} 已关联`,
+      status: firstFrameProgress ? progressStepStatus(firstFrameProgress.status) : totalShots > 0 && firstFrames === totalShots ? "done" : firstFrames > 0 ? "warn" : "pending",
       tab: "first_frames",
-      icon: ImagePlus
+      icon: ImagePlus,
+      percent: firstFrameProgress?.percent
     },
     {
       key: "assets",
@@ -682,18 +718,20 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
     {
       key: "voice",
       label: "分镜配音",
-      metric: staleVoice ? `${staleVoice} 条需更新` : generatedVoice ? `${generatedVoice}/${totalShots} 已生成` : "未生成",
-      status: staleVoice ? "warn" : totalShots > 0 && generatedVoice === totalShots ? "done" : generatedVoice > 0 ? "warn" : "pending",
+      metric: voiceProgress ? `${voiceProgress.completed}/${voiceProgress.total} · ${voiceProgress.percent}%` : staleVoice ? `${staleVoice} 条需更新` : generatedVoice ? `${generatedVoice}/${totalShots} 已生成` : "未生成",
+      status: voiceProgress ? progressStepStatus(voiceProgress.status) : staleVoice ? "warn" : totalShots > 0 && generatedVoice === totalShots ? "done" : generatedVoice > 0 ? "warn" : "pending",
       tab: "voice",
-      icon: Mic2
+      icon: Mic2,
+      percent: voiceProgress?.percent
     },
     {
       key: "lipsync",
       label: "口型同步",
-      metric: staleLipsync ? `${staleLipsync} 条需更新` : syncedShots ? `${syncedShots}/${totalShots} 已同步` : "等待视频和配音",
-      status: staleLipsync ? "warn" : totalShots > 0 && syncedShots === totalShots ? "done" : syncedShots > 0 ? "warn" : "pending",
+      metric: lipsyncProgress ? `${lipsyncProgress.completed}/${lipsyncProgress.total} · ${lipsyncProgress.percent}%` : staleLipsync ? `${staleLipsync} 条需更新` : syncedShots ? `${syncedShots}/${totalShots} 已同步` : "等待视频和配音",
+      status: lipsyncProgress ? progressStepStatus(lipsyncProgress.status) : staleLipsync ? "warn" : totalShots > 0 && syncedShots === totalShots ? "done" : syncedShots > 0 ? "warn" : "pending",
       tab: "run",
-      icon: Mic2
+      icon: Mic2,
+      percent: lipsyncProgress?.percent
     },
     {
       key: "workflow",
@@ -706,20 +744,226 @@ function productionSteps(detail: ProjectDetail, tasks: WebTask[]): ProductionSte
     {
       key: "tasks",
       label: "任务运行",
-      metric: activeTasks ? `${activeTasks} 个进行中` : generatedShots ? `${generatedShots}/${totalShots} 已生成` : failedTasks ? `${failedTasks} 个失败` : succeededTasks ? `${succeededTasks} 个完成` : "未提交",
+      metric: activeProgressText || (videoProgress ? `${videoProgress.completed}/${videoProgress.total} 分镜视频` : activeTasks ? `${activeTasks} 个进行中` : generatedShots ? `${generatedShots}/${totalShots} 已生成` : failedTasks ? `${failedTasks} 个失败` : succeededTasks ? `${succeededTasks} 个完成` : "未提交"),
       status: activeTasks ? "running" : failedTasks ? "warn" : succeededTasks ? "done" : "pending",
       tab: "run",
-      icon: Activity
+      icon: Activity,
+      percent: activeTask?.progress?.percent ?? videoProgress?.percent
     },
     {
       key: "renders",
       label: "最终成片",
-      metric: renderCount ? `${renderCount} 个结果` : "未生成",
-      status: renderCount ? "done" : "pending",
+      metric: renderProgress ? `${renderProgress.completed}/${renderProgress.total} · ${renderProgress.percent}%` : renderCount ? `${renderCount} 个结果` : "未生成",
+      status: renderProgress ? progressStepStatus(renderProgress.status) : renderCount ? "done" : "pending",
       tab: "review",
-      icon: Film
+      icon: Film,
+      percent: renderProgress?.percent
     }
   ];
+}
+
+function progressStepStatus(status: string): ProductionStep["status"] {
+  if (status === "done" || status === "succeeded") return "done";
+  if (status === "running") return "running";
+  if (status === "failed") return "warn";
+  return "pending";
+}
+
+function ActiveProductionProgress({
+  detail,
+  onSelectTab,
+  tasks
+}: {
+  detail: ProjectDetail;
+  onSelectTab: (tab: TabKey) => void;
+  tasks: WebTask[];
+}) {
+  const { cancelQueuedTask, setMessage } = useAppStore();
+  const task = activeProductionTask(tasks);
+  const progress = task?.progress;
+  const [pausing, setPausing] = useState(false);
+  if (!task || !progress?.available) return null;
+  const activeTask = task;
+  const media = (progress.media || []).filter((item) => ["video", "lipsync", "final"].includes(item.kind));
+  const visibleMedia = media.slice(-4).reverse();
+  const percent = typeof progress.percent === "number" ? progress.percent : 0;
+
+  async function requestPause() {
+    setPausing(true);
+    try {
+      await cancelQueuedTask(activeTask.id);
+      setMessage(activeTask.status === "queued" ? "任务已取消" : "已发送暂停请求，当前远端步骤结束后生效");
+    } finally {
+      setPausing(false);
+    }
+  }
+
+  return (
+    <section className="panel p-5">
+      <div className="flex items-start justify-between gap-4 max-lg:flex-col">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-950">
+            <Activity size={18} className="text-teal-700" />
+            当前生产流水线
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <span>{task.label}</span>
+            <span className="h-1 w-1 rounded-full bg-slate-300" />
+            <span>{taskStatusLabel(task.status)}</span>
+            {progress.current_label ? (
+              <>
+                <span className="h-1 w-1 rounded-full bg-slate-300" />
+                <span>{progress.current_label}</span>
+              </>
+            ) : null}
+            {progress.current_item ? (
+              <>
+                <span className="h-1 w-1 rounded-full bg-slate-300" />
+                <span>
+                  {progress.current_item.shot_id}（{progress.current_item.index}/{progress.current_item.total}）
+                </span>
+              </>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button className="btn h-9 px-3" onClick={() => onSelectTab("run")} type="button">
+            <Terminal size={16} />
+            查看日志
+          </button>
+          {progress.pause?.available ? (
+            <button
+              className="btn h-9 px-3 border-amber-200 text-amber-700 hover:border-amber-300 hover:bg-amber-50"
+              disabled={pausing || progress.pause.requested}
+              onClick={requestPause}
+              type="button"
+            >
+              {pausing ? <Loader2 className="animate-spin" size={16} /> : <PauseCircle size={16} />}
+              {progress.pause.requested ? "暂停请求中" : task.status === "queued" ? "取消排队" : "请求暂停"}
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-2">
+        <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
+          <span>总进度</span>
+          <span>{percent}%</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-teal-600 transition-all" style={{ width: `${Math.max(0, Math.min(percent, 100))}%` }} />
+        </div>
+      </div>
+
+      {progress.steps?.length ? (
+        <div className="mt-5 grid grid-cols-7 gap-2 max-2xl:grid-cols-4 max-lg:grid-cols-2 max-sm:grid-cols-1">
+          {progress.steps.map((step, index) => {
+            const status = progressStepStatus(step.status);
+            return (
+              <button
+                key={`${step.key}-${index}`}
+                className={`rounded-lg border px-3 py-3 text-left transition ${
+                  status === "running"
+                    ? "border-blue-200 bg-blue-50/70"
+                    : status === "done"
+                    ? "border-teal-200 bg-teal-50/60"
+                    : status === "warn"
+                    ? "border-red-200 bg-red-50/60"
+                    : "border-slate-200 bg-white hover:bg-slate-50"
+                }`}
+                onClick={() => {
+                  if (isTabKey(step.tab)) onSelectTab(step.tab);
+                }}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold text-slate-900">{step.label}</span>
+                  <ProductionStatusPill status={status} />
+                </div>
+                <div className="mt-2 text-xs text-slate-500">
+                  {step.completed}/{step.total} · {step.percent}%
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/80">
+                  <div
+                    className={`h-full rounded-full ${status === "running" ? "bg-blue-500" : status === "done" ? "bg-teal-500" : "bg-slate-300"}`}
+                    style={{ width: `${Math.max(0, Math.min(step.percent, 100))}%` }}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <GeneratedMediaStrip projectName={detail.name} media={visibleMedia} onOpenReview={() => onSelectTab("review")} />
+    </section>
+  );
+}
+
+function GeneratedMediaStrip({
+  media,
+  onOpenReview,
+  projectName
+}: {
+  media: WebTaskMedia[];
+  onOpenReview: () => void;
+  projectName: string;
+}) {
+  if (!media.length) return null;
+  return (
+    <div className="mt-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+          <ListVideo size={17} className="text-teal-700" />
+          已生成视频
+        </div>
+        <button className="btn h-8 px-2 text-xs" onClick={onOpenReview} type="button">
+          <Eye size={15} />
+          成片审看
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-3 max-xl:grid-cols-2 max-sm:grid-cols-1">
+        {media.map((item) => (
+          <div key={`${item.kind}-${item.path}`} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+            {item.kind === "video" || item.kind === "lipsync" || item.kind === "final" ? (
+              <video className="aspect-video w-full bg-slate-950 object-contain" controls preload="metadata" src={mediaUrl(projectName, item.path)} />
+            ) : null}
+            <div className="flex items-center justify-between gap-2 px-3 py-2">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium text-slate-900">{item.shot_id || item.title}</div>
+                <div className="truncate text-xs text-slate-500">{mediaKindLabel(item.kind)}</div>
+              </div>
+              <a className="btn h-8 px-2 text-xs" href={mediaUrl(projectName, item.path)} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} />
+              </a>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function activeProductionTask(tasks: WebTask[]) {
+  return (
+    tasks.find((task) => task.status === "running" && task.progress?.available) ||
+    tasks.find((task) => task.status === "queued" && task.progress?.available) ||
+    tasks.find((task) => task.progress?.available) ||
+    null
+  );
+}
+
+function isTabKey(value: unknown): value is TabKey {
+  return typeof value === "string" && tabItems.some((item) => item.key === value);
+}
+
+function mediaKindLabel(kind: string) {
+  return {
+    video: "分镜视频",
+    lipsync: "口型同步视频",
+    final: "最终成片",
+    audio: "配音"
+  }[kind] || kind;
 }
 
 function ProductionStatusPill({ status }: { status: ProductionStep["status"] }) {
@@ -3315,6 +3559,9 @@ function RunPanel() {
   if (!detail) return null;
   const project = detail;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) || tasks[0] || null;
+  const canPauseSelected =
+    selectedTask?.status === "queued" ||
+    (selectedTask?.status === "running" && Boolean(selectedTask.progress?.pause?.available));
   const firstRemoteProfile = project.remote_profiles_detail[0]?.name || "";
 
   const actions = [
@@ -3418,6 +3665,7 @@ function RunPanel() {
   async function cancelSelected() {
     if (!selectedTask) return;
     await cancelQueuedTask(selectedTask.id);
+    setMessage(selectedTask.status === "queued" ? "任务已取消" : "已发送暂停请求，当前远端步骤结束后生效");
   }
 
   return (
@@ -3477,6 +3725,14 @@ function RunPanel() {
                   <div className="mt-1 truncate text-xs text-slate-500">
                     {task.id} · {formatTaskTime(task.created_at)}
                   </div>
+                  {typeof task.progress?.percent === "number" ? (
+                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        className={`h-full rounded-full ${task.status === "running" ? "bg-blue-500" : task.status === "succeeded" ? "bg-teal-500" : "bg-slate-300"}`}
+                        style={{ width: `${Math.max(0, Math.min(task.progress.percent, 100))}%` }}
+                      />
+                    </div>
+                  ) : null}
                 </button>
               ))
             ) : (
@@ -3505,9 +3761,15 @@ function RunPanel() {
               </div>
               <div className="flex items-center gap-2">
                 <TaskStatusBadge status={selectedTask.status} />
-                {selectedTask.status === "queued" ? (
-                  <button className="btn h-9 px-3" onClick={cancelSelected} type="button" title="取消任务">
-                    <XCircle size={16} />
+                {canPauseSelected ? (
+                  <button
+                    className="btn h-9 px-3"
+                    disabled={Boolean(selectedTask.cancel_requested)}
+                    onClick={cancelSelected}
+                    type="button"
+                    title={selectedTask.status === "queued" ? "取消任务" : "请求暂停"}
+                  >
+                    {selectedTask.status === "running" ? <PauseCircle size={16} /> : <XCircle size={16} />}
                   </button>
                 ) : null}
               </div>
@@ -3518,6 +3780,7 @@ function RunPanel() {
                 {selectedTask.fix ? <div className="mt-1 whitespace-pre-wrap">{selectedTask.fix}</div> : null}
               </div>
             ) : null}
+            <TaskProgressOverview projectName={project.name} task={selectedTask} />
             <div className="grid grid-cols-[minmax(260px,0.82fr)_1fr] gap-0 max-2xl:grid-cols-1">
               <div className="border-r border-slate-100 p-5 max-2xl:border-b max-2xl:border-r-0">
                 <div className="mb-3 text-sm font-semibold text-slate-800">执行日志</div>
@@ -3554,6 +3817,96 @@ function RunPanel() {
         )}
       </div>
     </section>
+  );
+}
+
+function TaskProgressOverview({ projectName, task }: { projectName: string; task: WebTask }) {
+  const progress = task.progress;
+  if (!progress?.available) return null;
+  const percent = typeof progress.percent === "number" ? progress.percent : 0;
+  const media = (progress.media || []).filter((item) => ["video", "lipsync", "final"].includes(item.kind)).slice(-6).reverse();
+  return (
+    <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-4">
+      <div className="grid gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <Activity size={17} className="text-teal-700" />
+              任务进度
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              <span>{progress.current_label || "等待调度"}</span>
+              {progress.current_item ? (
+                <>
+                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                  <span>
+                    {progress.current_item.shot_id}（{progress.current_item.index}/{progress.current_item.total}）
+                  </span>
+                </>
+              ) : null}
+              {task.cancel_requested ? (
+                <>
+                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                  <span className="text-amber-700">暂停请求中</span>
+                </>
+              ) : null}
+            </div>
+          </div>
+          <div className="text-sm font-semibold text-slate-900">{percent}%</div>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-white">
+          <div className="h-full rounded-full bg-teal-600 transition-all" style={{ width: `${Math.max(0, Math.min(percent, 100))}%` }} />
+        </div>
+        {progress.steps?.length ? (
+          <div className="grid grid-cols-7 gap-2 max-2xl:grid-cols-4 max-md:grid-cols-2">
+            {progress.steps.map((step) => {
+              const status = progressStepStatus(step.status);
+              return (
+                <div key={step.key} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="truncate text-xs font-semibold text-slate-800">{step.label}</div>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${status === "running" ? "bg-blue-500" : status === "done" ? "bg-teal-500" : "bg-slate-300"}`} />
+                  </div>
+                  <div className="mt-1 text-xs text-slate-500">
+                    {step.completed}/{step.total} · {step.percent}%
+                  </div>
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={`h-full rounded-full ${status === "running" ? "bg-blue-500" : status === "done" ? "bg-teal-500" : "bg-slate-300"}`}
+                      style={{ width: `${Math.max(0, Math.min(step.percent, 100))}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        {media.length ? (
+          <div>
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <ListVideo size={16} className="text-teal-700" />
+              可查看的视频
+            </div>
+            <div className="grid grid-cols-3 gap-3 max-2xl:grid-cols-2 max-md:grid-cols-1">
+              {media.map((item) => (
+                <a
+                  key={`${item.kind}-${item.path}`}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition hover:border-teal-200 hover:bg-teal-50/50"
+                  href={mediaUrl(projectName, item.path)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="min-w-0 truncate">
+                    {item.shot_id || item.title} · {mediaKindLabel(item.kind)}
+                  </span>
+                  <ExternalLink size={15} className="shrink-0 text-slate-400" />
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 

@@ -7,7 +7,10 @@ import json
 import mimetypes
 import os
 import re
+import shlex
 import shutil
+import subprocess
+import time
 from argparse import Namespace
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -70,6 +73,28 @@ ACTION_LABELS = {
     "novel-draft": "生成小说章节草稿",
 }
 PROMPT_PROFILE_KEYS = tuple(PromptProfile.__dataclass_fields__)
+PRODUCTION_PIPELINE = [
+    {"key": "validate", "label": "项目校验", "tab": "run"},
+    {"key": "first_frames", "label": "首帧素材", "tab": "first_frames"},
+    {"key": "videos", "label": "分镜视频", "tab": "review"},
+    {"key": "voiceover", "label": "分镜配音", "tab": "voice"},
+    {"key": "lipsync", "label": "口型同步", "tab": "run"},
+    {"key": "probe", "label": "自动验片", "tab": "review"},
+    {"key": "assemble", "label": "最终成片", "tab": "review"},
+]
+PRODUCTION_STEP_BY_LOG_INDEX = {
+    1: "validate",
+    2: "first_frames",
+    3: "videos",
+    4: "voiceover",
+    5: "lipsync",
+    6: "probe",
+    7: "assemble",
+}
+REMOTE_PROGRESS_CACHE_TTL_SECONDS = 10.0
+REMOTE_PREVIEW_SYNC_CACHE_TTL_SECONDS = 30.0
+_REMOTE_PROGRESS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_REMOTE_PREVIEW_SYNC_CACHE: dict[str, float] = {}
 
 
 def run_web_server(
@@ -315,11 +340,12 @@ def _handler_factory(workspace: Path, *, token: str | None):
                 self._send_json({"ok": True, **result, "project": _project_detail(project_root)})
                 return
             if method == "GET" and tail == ["tasks"]:
-                self._send_json({"ok": True, "tasks": task_queue.list(project=project_name)})
+                tasks = [_task_with_progress(workspace, task) for task in task_queue.list(project=project_name)]
+                self._send_json({"ok": True, "tasks": tasks})
                 return
             if method == "POST" and tail == ["tasks"]:
                 task = _enqueue_project_task(task_queue, project_name, project_root, self._read_json())
-                self._send_json({"ok": True, "task": task}, status=202)
+                self._send_json({"ok": True, "task": _task_with_progress(workspace, task)}, status=202)
                 return
             if method == "POST" and tail == ["workflow-check"]:
                 result = _run_project_action(project_root, "comfyui-check", self._read_json())
@@ -357,19 +383,20 @@ def _handler_factory(workspace: Path, *, token: str | None):
 
         def _handle_tasks(self, method: str, parts: list[str]) -> None:
             if method == "GET" and not parts:
-                self._send_json({"ok": True, "tasks": task_queue.list()})
+                tasks = [_task_with_progress(workspace, task) for task in task_queue.list()]
+                self._send_json({"ok": True, "tasks": tasks})
                 return
             if method == "GET" and len(parts) == 1:
                 task = task_queue.get(parts[0])
                 if task is None:
                     raise ConfigError("task not found", fix="Refresh the task list.")
-                self._send_json({"ok": True, "task": task})
+                self._send_json({"ok": True, "task": _task_with_progress(workspace, task)})
                 return
             if method == "POST" and len(parts) == 2 and parts[1] == "cancel":
                 task = task_queue.cancel(parts[0])
                 if task is None:
                     raise ConfigError("task not found", fix="Refresh the task list.")
-                self._send_json({"ok": True, "task": task})
+                self._send_json({"ok": True, "task": _task_with_progress(workspace, task)})
                 return
             raise ConfigError("unknown task API route", fix="Use /api/tasks or /api/tasks/<id>.")
 
@@ -518,6 +545,430 @@ def _project_detail(root: Path) -> dict[str, Any]:
         "workflows_detail": list_workflows(project),
         "renders": project.manifest.get("renders", {}),
     }
+
+
+def _task_with_progress(workspace: Path, task: dict[str, Any]) -> dict[str, Any]:
+    result = dict(task)
+    project_name = str(result.get("project") or "")
+    if not PROJECT_NAME_RE.match(project_name):
+        return result
+    project_root = _project_path(workspace, project_name)
+    if not (project_root / "project.yaml").exists():
+        return result
+    try:
+        result["progress"] = _task_progress(project_root, result)
+    except AutoVideoError as exc:
+        result["progress"] = {"available": False, "error": exc.message, "fix": exc.fix}
+    except Exception as exc:
+        result["progress"] = {"available": False, "error": str(exc)}
+    return result
+
+
+def _task_progress(project_root: Path, task: dict[str, Any]) -> dict[str, Any]:
+    action = str(task.get("action") or "")
+    if action == "produce-all":
+        return _production_task_progress(project_root, task)
+    if action in {"generate", "remote-run"}:
+        return _single_generation_progress(project_root, task)
+    if action in {"first-frame-generate", "remote-first-frame"}:
+        return _single_generation_progress(project_root, task, forced_step="first_frames")
+    if action == "lipsync":
+        return _single_generation_progress(project_root, task, forced_step="lipsync")
+    return {"available": False}
+
+
+def _production_task_progress(project_root: Path, task: dict[str, Any]) -> dict[str, Any]:
+    project = load_project(project_root)
+    shot_ids = [shot.id for shot in project.shots]
+    total = len(shot_ids)
+    remote_media = _remote_progress_media(project, task)
+    local_media = _local_progress_media(project)
+    counts = {
+        "first_frames": max(_first_frame_count(project), len(remote_media.get("first_frames", []))),
+        "videos": max(len(local_media["videos"]), len(remote_media.get("videos", []))),
+        "voiceover": len(local_media["audio"]),
+        "lipsync": max(len(local_media["lipsync"]), len(remote_media.get("lipsync", []))),
+        "assemble": len(local_media["final"]),
+    }
+    active_key = _active_pipeline_key(task, counts, total)
+    steps = _pipeline_steps(task, active_key, counts, total)
+    media = [*local_media["videos"], *local_media["lipsync"], *local_media["final"]]
+    current = _current_item(active_key, shot_ids, counts)
+    return {
+        "available": True,
+        "kind": "production",
+        "status": task.get("status"),
+        "current_module": active_key,
+        "current_label": _pipeline_label(active_key),
+        "current_item": current,
+        "percent": _overall_percent(steps, task),
+        "steps": steps,
+        "media": media,
+        "remote": {
+            "profile": _progress_profile_name(project, task),
+            "videos_done": len(remote_media.get("videos", [])),
+            "first_frames_done": len(remote_media.get("first_frames", [])),
+            "lipsync_done": len(remote_media.get("lipsync", [])),
+        },
+        "pause": _pause_state(task),
+    }
+
+
+def _single_generation_progress(project_root: Path, task: dict[str, Any], *, forced_step: str | None = None) -> dict[str, Any]:
+    project = load_project(project_root)
+    total = len(project.shots)
+    remote_media = _remote_progress_media(project, task)
+    local_media = _local_progress_media(project)
+    payload = task.get("payload") if isinstance(task.get("payload"), dict) else {}
+    kind = str(payload.get("kind") or "")
+    active_key = forced_step or ("lipsync" if kind == "lipsync" else "first_frames" if kind == "image" else "videos")
+    counts = {
+        "first_frames": max(_first_frame_count(project), len(remote_media.get("first_frames", []))),
+        "videos": max(len(local_media["videos"]), len(remote_media.get("videos", []))),
+        "voiceover": len(local_media["audio"]),
+        "lipsync": max(len(local_media["lipsync"]), len(remote_media.get("lipsync", []))),
+        "assemble": len(local_media["final"]),
+    }
+    steps = [
+        _step_payload(
+            active_key,
+            _pipeline_label(active_key),
+            counts.get(active_key, 0),
+            total if active_key != "assemble" else 1,
+            status="running" if task.get("status") == "running" else "done" if task.get("status") == "succeeded" else str(task.get("status") or "pending"),
+        )
+    ]
+    return {
+        "available": True,
+        "kind": "module",
+        "status": task.get("status"),
+        "current_module": active_key,
+        "current_label": _pipeline_label(active_key),
+        "current_item": _current_item(active_key, [shot.id for shot in project.shots], counts),
+        "percent": _overall_percent(steps, task),
+        "steps": steps,
+        "media": [*local_media["videos"], *local_media["lipsync"], *local_media["final"]],
+        "remote": {
+            "profile": _progress_profile_name(project, task),
+            "videos_done": len(remote_media.get("videos", [])),
+            "first_frames_done": len(remote_media.get("first_frames", [])),
+            "lipsync_done": len(remote_media.get("lipsync", [])),
+        },
+        "pause": _pause_state(task),
+    }
+
+
+def _pipeline_steps(task: dict[str, Any], active_key: str | None, counts: dict[str, int], total_shots: int) -> list[dict[str, Any]]:
+    active_index = _pipeline_index(active_key)
+    steps: list[dict[str, Any]] = []
+    for index, raw in enumerate(PRODUCTION_PIPELINE):
+        key = str(raw["key"])
+        total = total_shots if key in {"first_frames", "videos", "voiceover", "lipsync"} else 1
+        completed = 0
+        if key == "validate":
+            completed = 1 if task.get("status") in {"running", "succeeded", "failed"} else 0
+        elif key == "probe":
+            completed = 1 if _pipeline_index("assemble") <= active_index or task.get("status") == "succeeded" else 0
+        elif key == "assemble":
+            completed = min(counts.get("assemble", 0), 1)
+        else:
+            completed = min(counts.get(key, 0), total)
+        if task.get("status") == "succeeded":
+            status = "done"
+        elif task.get("status") == "failed" and key == active_key:
+            status = "failed"
+        elif active_key == key and task.get("status") == "running":
+            status = "running"
+        elif index < active_index:
+            status = "done"
+            completed = total
+        elif completed >= total and total > 0:
+            status = "done"
+        else:
+            status = "pending"
+        steps.append(_step_payload(key, str(raw["label"]), completed, total, status=status, tab=str(raw["tab"])))
+    return steps
+
+
+def _step_payload(
+    key: str,
+    label: str,
+    completed: int,
+    total: int,
+    *,
+    status: str,
+    tab: str | None = None,
+) -> dict[str, Any]:
+    safe_total = max(total, 1)
+    percent = int(round((min(completed, safe_total) / safe_total) * 100))
+    return {
+        "key": key,
+        "label": label,
+        "completed": completed,
+        "total": total,
+        "percent": percent,
+        "status": status,
+        "tab": tab,
+    }
+
+
+def _overall_percent(steps: list[dict[str, Any]], task: dict[str, Any]) -> int:
+    if not steps:
+        return 0
+    if task.get("status") == "succeeded":
+        return 100
+    done = sum(float(step.get("percent") or 0) / 100 for step in steps)
+    return int(round((done / len(steps)) * 100))
+
+
+def _active_pipeline_key(task: dict[str, Any], counts: dict[str, int], total_shots: int) -> str | None:
+    status = str(task.get("status") or "")
+    logs = task.get("logs") if isinstance(task.get("logs"), list) else []
+    for raw in reversed(logs):
+        message = str(raw.get("message") if isinstance(raw, dict) else raw)
+        match = re.search(r"步骤\s*(\d+)\s*/\s*7", message)
+        if match:
+            return PRODUCTION_STEP_BY_LOG_INDEX.get(int(match.group(1)))
+    if status in {"queued"}:
+        return "validate"
+    if status in {"succeeded"}:
+        return "assemble"
+    for key in ("first_frames", "videos", "voiceover", "lipsync"):
+        if counts.get(key, 0) < total_shots:
+            return key
+    if counts.get("assemble", 0) <= 0:
+        return "assemble"
+    return None
+
+
+def _pipeline_label(key: str | None) -> str:
+    for step in PRODUCTION_PIPELINE:
+        if step["key"] == key:
+            return str(step["label"])
+    return "等待调度"
+
+
+def _pipeline_index(key: str | None) -> int:
+    for index, step in enumerate(PRODUCTION_PIPELINE):
+        if step["key"] == key:
+            return index
+    return 0
+
+
+def _current_item(active_key: str | None, shot_ids: list[str], counts: dict[str, int]) -> dict[str, Any] | None:
+    if active_key not in {"first_frames", "videos", "voiceover", "lipsync"} or not shot_ids:
+        return None
+    completed = min(max(counts.get(active_key, 0), 0), len(shot_ids))
+    index = min(completed, len(shot_ids) - 1)
+    return {"shot_id": shot_ids[index], "index": index + 1, "total": len(shot_ids)}
+
+
+def _pause_state(task: dict[str, Any]) -> dict[str, Any]:
+    status = str(task.get("status") or "")
+    requested = bool(task.get("cancel_requested", False))
+    return {
+        "requested": requested,
+        "available": status in {"queued", "running"},
+        "mode": "instant" if status == "queued" else "soft" if status == "running" else "none",
+        "label": "暂停请求中" if requested else "可暂停" if status in {"queued", "running"} else "不可暂停",
+    }
+
+
+def _local_progress_media(project: Any) -> dict[str, list[dict[str, Any]]]:
+    videos: list[dict[str, Any]] = []
+    audio: list[dict[str, Any]] = []
+    lipsync: list[dict[str, Any]] = []
+    for shot in project.shots:
+        clip = _shot_media_path(project, shot.id, "clip", [f"generated/clips/{shot.id}.mp4"])
+        if clip:
+            videos.append(_media_item(project, "video", clip, shot_id=shot.id, title=shot.title or shot.id))
+        voice = _shot_media_path(project, shot.id, "audio", [f"generated/audio/{shot.id}.wav", f"generated/audio/{shot.id}.mp3"])
+        if voice:
+            audio.append(_media_item(project, "audio", voice, shot_id=shot.id, title=shot.title or shot.id))
+        synced = _shot_media_path(project, shot.id, "lipsync_clip", [f"generated/lipsync/{shot.id}.mp4"])
+        if synced:
+            lipsync.append(_media_item(project, "lipsync", synced, shot_id=shot.id, title=shot.title or shot.id))
+    final: list[dict[str, Any]] = []
+    renders = project.manifest.get("renders", {}) if isinstance(project.manifest, dict) else {}
+    if isinstance(renders, dict):
+        for name, raw in sorted(renders.items()):
+            if not isinstance(raw, dict):
+                continue
+            path = _existing_relative_path(project.config.root, str(raw.get("path") or ""))
+            if path:
+                final.append(_media_item(project, "final", path, shot_id=None, title=str(name)))
+    return {"videos": videos, "audio": audio, "lipsync": lipsync, "final": final}
+
+
+def _first_frame_count(project: Any) -> int:
+    count = 0
+    for shot in project.shots:
+        linked = next((ref.path for ref in shot.refs if ref.role == "first_frame"), "")
+        if _existing_relative_path(project.config.root, linked) or _existing_relative_path(project.config.root, f"generated/images/{shot.id}.png"):
+            count += 1
+    return count
+
+
+def _shot_media_path(project: Any, shot_id: str, manifest_key: str, fallbacks: list[str]) -> str | None:
+    manifest_shots = project.manifest.get("shots", {}) if isinstance(project.manifest, dict) else {}
+    shot_manifest = manifest_shots.get(shot_id, {}) if isinstance(manifest_shots, dict) else {}
+    if isinstance(shot_manifest, dict):
+        manifest_path = _existing_relative_path(project.config.root, str(shot_manifest.get(manifest_key) or ""))
+        if manifest_path:
+            return manifest_path
+    for fallback in fallbacks:
+        existing = _existing_relative_path(project.config.root, fallback)
+        if existing:
+            return existing
+    return None
+
+
+def _existing_relative_path(root: Path, value: str) -> str | None:
+    if not value:
+        return None
+    try:
+        path = resolve_project_path(root, value)
+    except AutoVideoError:
+        return None
+    return value if path.exists() and path.is_file() else None
+
+
+def _media_item(project: Any, kind: str, relative: str, *, shot_id: str | None, title: str) -> dict[str, Any]:
+    path = resolve_project_path(project.config.root, relative)
+    stat = path.stat()
+    return {
+        "kind": kind,
+        "shot_id": shot_id,
+        "title": title,
+        "path": relative,
+        "bytes": stat.st_size,
+        "updated_at": stat.st_mtime,
+    }
+
+
+def _remote_progress_media(project: Any, task: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    if task.get("status") != "running":
+        return {"first_frames": [], "videos": [], "lipsync": []}
+    profile_name = _progress_profile_name(project, task)
+    if not profile_name:
+        return {"first_frames": [], "videos": [], "lipsync": []}
+    raw = project.config.remote_profiles.get(profile_name) or {}
+    host = str(_task_payload_value(task, "host") or raw.get("host") or "")
+    remote_dir = str(_task_payload_value(task, "remote_dir") or raw.get("remote_dir") or "")
+    if not host or not remote_dir:
+        return {"first_frames": [], "videos": [], "lipsync": []}
+    ssh_options = tuple(_profile_string_list(raw.get("ssh_options")))
+    first_frames = _cached_remote_files(host, remote_dir, ssh_options, "generated/images", (".png", ".jpg", ".jpeg"))
+    videos = _cached_remote_files(host, remote_dir, ssh_options, "generated/clips", (".mp4", ".mov", ".webm"))
+    lipsync = _cached_remote_files(host, remote_dir, ssh_options, "generated/lipsync", (".mp4", ".mov", ".webm"))
+    if videos:
+        _sync_remote_preview_dir(project.config.root, host, remote_dir, ssh_options, "generated/clips")
+    if lipsync:
+        _sync_remote_preview_dir(project.config.root, host, remote_dir, ssh_options, "generated/lipsync")
+    return {
+        "first_frames": first_frames,
+        "videos": videos,
+        "lipsync": lipsync,
+    }
+
+
+def _progress_profile_name(project: Any, task: dict[str, Any]) -> str:
+    payload_profile = str(_task_payload_value(task, "profile") or "")
+    if payload_profile:
+        return payload_profile
+    return _first_remote_profile(project) or ""
+
+
+def _task_payload_value(task: dict[str, Any], key: str) -> Any:
+    payload = task.get("payload")
+    return payload.get(key) if isinstance(payload, dict) else None
+
+
+def _cached_remote_files(
+    host: str,
+    remote_dir: str,
+    ssh_options: tuple[str, ...],
+    subdir: str,
+    suffixes: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    cache_key = "|".join((host, remote_dir, subdir, ",".join(ssh_options), ",".join(suffixes)))
+    now = time.monotonic()
+    cached = _REMOTE_PROGRESS_CACHE.get(cache_key)
+    if cached and now - cached[0] < REMOTE_PROGRESS_CACHE_TTL_SECONDS:
+        return list(cached[1].get("files", []))
+    files = _query_remote_files(host, remote_dir, ssh_options, subdir, suffixes)
+    _REMOTE_PROGRESS_CACHE[cache_key] = (now, {"files": files})
+    return files
+
+
+def _sync_remote_preview_dir(
+    project_root: Path,
+    host: str,
+    remote_dir: str,
+    ssh_options: tuple[str, ...],
+    subdir: str,
+) -> None:
+    cache_key = "|".join((project_root.as_posix(), host, remote_dir, subdir, ",".join(ssh_options)))
+    now = time.monotonic()
+    last = _REMOTE_PREVIEW_SYNC_CACHE.get(cache_key)
+    if last and now - last < REMOTE_PREVIEW_SYNC_CACHE_TTL_SECONDS:
+        return
+    _REMOTE_PREVIEW_SYNC_CACHE[cache_key] = now
+    remote_path = f"{remote_dir.rstrip('/')}/outputs/{subdir.strip('/')}/"
+    local_dir = resolve_project_path(project_root, subdir.strip("/"))
+    local_dir.mkdir(parents=True, exist_ok=True)
+    remote_shell = " ".join(("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *_progress_ssh_option_args(ssh_options)))
+    command = [
+        "rsync",
+        "-az",
+        "--update",
+        "-e",
+        remote_shell,
+        f"{host}:{remote_path}",
+        f"{local_dir.as_posix()}/",
+    ]
+    try:
+        subprocess.run(command, check=False, capture_output=True, text=True, timeout=20)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return
+
+
+def _query_remote_files(
+    host: str,
+    remote_dir: str,
+    ssh_options: tuple[str, ...],
+    subdir: str,
+    suffixes: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    remote_path = f"{remote_dir.rstrip('/')}/outputs/{subdir.strip('/')}"
+    suffix_expr = " -o ".join(f"-name '*{suffix}'" for suffix in suffixes)
+    command = f"find {shlex.quote(remote_path)} -maxdepth 1 -type f \\( {suffix_expr} \\) -printf '%f|%s|%T@\\n' 2>/dev/null || true"
+    args = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", *_progress_ssh_option_args(ssh_options), host, command]
+    try:
+        completed = subprocess.run(args, check=False, capture_output=True, text=True, timeout=7)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if completed.returncode != 0:
+        return []
+    files: list[dict[str, Any]] = []
+    for line in completed.stdout.splitlines():
+        parts = line.split("|")
+        if len(parts) != 3:
+            continue
+        name, size, mtime = parts
+        stem = Path(name).stem
+        try:
+            files.append({"name": name, "shot_id": stem, "bytes": int(size), "updated_at": float(mtime)})
+        except ValueError:
+            files.append({"name": name, "shot_id": stem})
+    return sorted(files, key=lambda item: str(item.get("shot_id") or item.get("name") or ""))
+
+
+def _progress_ssh_option_args(options: tuple[str, ...]) -> list[str]:
+    args: list[str] = []
+    for option in options:
+        args.extend(["-o", option])
+    return args
 
 
 def _video_refresh_ids(project: Any) -> set[str]:

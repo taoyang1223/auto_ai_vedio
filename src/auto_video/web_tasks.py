@@ -35,6 +35,7 @@ class WebTask:
     error: str | None = None
     fix: str | None = None
     result: Any = None
+    cancel_requested: bool = False
     logs: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self, *, include_result: bool = True) -> dict[str, Any]:
@@ -50,6 +51,7 @@ class WebTask:
             "finished_at": self.finished_at,
             "error": self.error,
             "fix": self.fix,
+            "cancel_requested": self.cancel_requested,
             "logs": list(self.logs),
         }
         if include_result:
@@ -105,10 +107,14 @@ class WebTaskQueue:
             if task is None:
                 return None
             if task.status == "queued":
+                task.cancel_requested = True
                 task.status = "canceled"
                 task.finished_at = utc_now_iso()
                 self._runners.pop(task_id, None)
                 task.logs.append({"at": utc_now_iso(), "message": "任务已取消"})
+            elif task.status == "running" and not task.cancel_requested:
+                task.cancel_requested = True
+                task.logs.append({"at": utc_now_iso(), "message": "已请求暂停/取消；当前运行步骤结束后生效"})
             return task.to_dict()
 
     def _ensure_worker_locked(self) -> None:
