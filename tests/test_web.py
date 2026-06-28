@@ -628,6 +628,38 @@ def test_web_api_drafts_and_applies_novel_chapter(tmp_path):
     assert novel["chapters"][0]["title"] == "雨夜客栈"
 
 
+def test_web_task_drafts_novel_chapter(tmp_path):
+    with running_web(tmp_path) as base_url:
+        request_json(
+            base_url,
+            "/api/projects",
+            method="POST",
+            payload={"name": "novel_story", "template": "autodl_comfyui_wan"},
+        )
+        queued = request_json(
+            base_url,
+            "/api/projects/novel_story/tasks",
+            method="POST",
+            payload={
+                "action": "novel-draft",
+                "payload": {
+                    "chapter_text": "林舟说：“今晚不能再等。”苏眠看向窗外的雨夜客栈。",
+                    "title": "雨夜",
+                    "target_minutes": 1,
+                    "shot_seconds": 6,
+                    "provider": "mock",
+                },
+            },
+        )["task"]
+        task = wait_task(base_url, queued["id"])
+
+    assert task["status"] == "succeeded"
+    assert task["action"] == "novel-draft"
+    assert task["result"]["chapter"]["title"] == "雨夜"
+    assert task["result"]["meta"]["shot_count"] > 0
+    assert task["result"]["shots"]
+
+
 def test_web_api_manages_asset_library_and_shot_refs(tmp_path):
     with running_web(tmp_path) as base_url:
         request_json(

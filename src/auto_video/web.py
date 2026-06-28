@@ -67,6 +67,7 @@ ACTION_LABELS = {
     "produce-all": "一键完整生产",
     "continuity": "提取连续性尾帧",
     "remote-wrapup": "远程收尾检查",
+    "novel-draft": "生成小说章节草稿",
 }
 PROMPT_PROFILE_KEYS = tuple(PromptProfile.__dataclass_fields__)
 
@@ -730,6 +731,17 @@ def _run_project_action(
             force=bool(payload.get("force", False)),
         )
         logger(f"连续性尾帧完成，新增 {len(result.get('extracted', []))} 个，跳过 {len(result.get('skipped', []))} 个")
+        return result
+    if action == "novel-draft":
+        logger("读取章节正文并准备 Codex 分析")
+        result = draft_novel_chapter(load_project(project_root), payload)
+        meta = result.get("meta", {}) if isinstance(result, dict) else {}
+        logger(
+            "章节草稿完成："
+            f"{meta.get('shot_count', 0)} 个分镜，"
+            f"{meta.get('target_minutes', 0)} 分钟，"
+            f"分析器 {meta.get('analyzer', 'rules')}"
+        )
         return result
     if action == "produce-all":
         return _run_full_production(project_root, payload, logger)

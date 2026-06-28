@@ -915,6 +915,7 @@ type DraftProgressState = {
 };
 
 const NOVEL_CHAPTER_FORM_PREFIX = "auto-ai-video:novel-chapter-form:";
+const NOVEL_DRAFT_TASK_PREFIX = "auto-ai-video:novel-draft-task:";
 
 const draftProgressStages = [
   { at: 0, label: "准备章节内容", detail: "正在整理正文、章节标题和视频服务参数" },
@@ -937,8 +938,32 @@ function draftProgressForElapsed(elapsedMs: number, autoPlan: boolean): DraftPro
   return { percent, label: stage.label, detail: stage.detail };
 }
 
+function draftProgressForTask(task: WebTask | null, autoPlan: boolean, now: number): DraftProgressState {
+  if (!task) return draftProgressForElapsed(0, autoPlan);
+  if (task.status === "queued") {
+    return { percent: 8, label: "等待后台队列", detail: "章节草稿任务已创建，刷新页面也会继续保留" };
+  }
+  if (task.status === "succeeded") {
+    return { percent: 100, label: "草稿生成完成", detail: "章节分镜、人物档案和场景档案已整理完成" };
+  }
+  if (task.status === "failed") {
+    return { percent: 100, label: "生成失败", detail: task.error || "请查看任务运行日志" };
+  }
+  if (task.status === "canceled") {
+    return { percent: 100, label: "任务已取消", detail: "章节草稿生成已停止" };
+  }
+  const startedAt = Date.parse(task.started_at || task.created_at || "");
+  const progress = draftProgressForElapsed(Number.isFinite(startedAt) ? now - startedAt : 0, autoPlan);
+  const lastLog = task.logs.length ? task.logs[task.logs.length - 1]?.message : "";
+  return lastLog ? { ...progress, detail: lastLog } : progress;
+}
+
 function novelChapterFormKey(projectName: string) {
   return `${NOVEL_CHAPTER_FORM_PREFIX}${projectName}`;
+}
+
+function novelDraftTaskKey(projectName: string) {
+  return `${NOVEL_DRAFT_TASK_PREFIX}${projectName}`;
 }
 
 function readNovelChapterForm(projectName: string): Partial<NovelChapterFormDraft> {
@@ -962,8 +987,22 @@ function writeNovelChapterForm(projectName: string, value: NovelChapterFormDraft
   }
 }
 
+function readNovelDraftTask(projectName: string) {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(novelDraftTaskKey(projectName)) || "";
+}
+
+function writeNovelDraftTask(projectName: string, taskId: string) {
+  if (typeof window === "undefined") return;
+  if (taskId) {
+    window.localStorage.setItem(novelDraftTaskKey(projectName), taskId);
+  } else {
+    window.localStorage.removeItem(novelDraftTaskKey(projectName));
+  }
+}
+
 function NovelChapterPanel() {
-  const { applyNovel, detail, draftNovel, enqueueTask, novel, setMessage } = useAppStore();
+  const { applyNovel, detail, enqueueTask, loadTask, novel, refreshTasks, setMessage, tasks } = useAppStore();
   const [chapterText, setChapterText] = useState("");
   const [chapterTitle, setChapterTitle] = useState("");
   const [targetMinutes, setTargetMinutes] = useState("20");
@@ -975,6 +1014,9 @@ function NovelChapterPanel() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [draftProgress, setDraftProgress] = useState<DraftProgressState | null>(null);
+  const [draftTask, setDraftTask] = useState<WebTask | null>(null);
+  const [watchDraftTaskId, setWatchDraftTaskId] = useState("");
+  const [progressPulse, setProgressPulse] = useState(Date.now());
   const skipFormSave = useRef<string | null>(null);
   const progressHideTimer = useRef<number | null>(null);
 
@@ -992,17 +1034,88 @@ function NovelChapterPanel() {
     setDraftApplied(false);
     setError("");
     setDraftProgress(null);
+    setDraftTask(null);
+    setWatchDraftTaskId(readNovelDraftTask(detail.name));
   }, [detail?.name]);
 
   useEffect(() => {
-    if (busy !== "draft") return;
-    const startedAt = Date.now();
-    setDraftProgress(draftProgressForElapsed(0, autoPlan));
+    if (!detail || watchDraftTaskId) return;
+    const activeTask = tasks.find((task) => task.action === "novel-draft" && task.project === detail.name && isActiveTask(task));
+    if (activeTask) {
+      setDraftTask(activeTask);
+      setWatchDraftTaskId(activeTask.id);
+      writeNovelDraftTask(detail.name, activeTask.id);
+    }
+  }, [detail?.name, tasks, watchDraftTaskId]);
+
+  const draftTaskActive = Boolean(watchDraftTaskId && (!draftTask || isActiveTask(draftTask)));
+  const draftGenerating = busy === "draft" || draftTaskActive;
+  const displayedDraftProgress = draftGenerating ? draftProgressForTask(draftTask, autoPlan, progressPulse) : draftProgress;
+
+  useEffect(() => {
+    if (!draftGenerating) return;
     const timer = window.setInterval(() => {
-      setDraftProgress(draftProgressForElapsed(Date.now() - startedAt, autoPlan));
+      setProgressPulse(Date.now());
     }, 500);
     return () => window.clearInterval(timer);
-  }, [busy, autoPlan]);
+  }, [draftGenerating]);
+
+  useEffect(() => {
+    if (!detail || !watchDraftTaskId) return;
+    let closed = false;
+    const tick = async () => {
+      try {
+        const task = await loadTask(watchDraftTaskId);
+        if (closed) return;
+        setDraftTask(task);
+        setProgressPulse(Date.now());
+        if (task.status === "succeeded") {
+          const result = novelDraftResultFromTask(task);
+          if (result) {
+            setDraft(result);
+            setDraftApplied(false);
+            setDraftProgress(draftProgressForTask(task, autoPlan, Date.now()));
+            setMessage(
+              `章节草稿已生成：${formatDuration(result.meta.duration)} · ${result.meta.shot_count} 个分镜 · ${novelAnalyzerLabel(result.meta)}`
+            );
+          } else {
+            setError("章节草稿任务已完成，但结果格式不正确。请重新生成。");
+          }
+          writeNovelDraftTask(detail.name, "");
+          setWatchDraftTaskId("");
+          await refreshTasks(detail.name);
+          progressHideTimer.current = window.setTimeout(() => {
+            setDraftProgress(null);
+            progressHideTimer.current = null;
+          }, 450);
+        } else if (task.status === "failed" || task.status === "canceled") {
+          const message = task.status === "failed" ? task.error || "章节草稿生成失败" : "章节草稿生成已取消";
+          setError(message);
+          setMessage(message);
+          setDraftProgress(draftProgressForTask(task, autoPlan, Date.now()));
+          writeNovelDraftTask(detail.name, "");
+          setWatchDraftTaskId("");
+          await refreshTasks(detail.name);
+        }
+      } catch (failure) {
+        if (!closed) {
+          const message = friendlyError(failure);
+          setError(message);
+          setMessage(message);
+          setDraftTask(null);
+          setDraftProgress(null);
+          writeNovelDraftTask(detail.name, "");
+          setWatchDraftTaskId("");
+        }
+      }
+    };
+    tick();
+    const timer = window.setInterval(tick, 1500);
+    return () => {
+      closed = true;
+      window.clearInterval(timer);
+    };
+  }, [autoPlan, detail?.name, loadTask, refreshTasks, setMessage, watchDraftTaskId]);
 
   useEffect(() => {
     if (!detail) return;
@@ -1036,33 +1149,31 @@ function NovelChapterPanel() {
       window.clearTimeout(progressHideTimer.current);
       progressHideTimer.current = null;
     }
+    const payload = {
+      chapter_text: chapterText,
+      title: chapterTitle.trim() || undefined,
+      target_minutes: Number(targetMinutes),
+      shot_seconds: Number(shotSeconds),
+      provider: provider.trim() || project.config.default_video_provider,
+      analyzer: "codex" as const,
+      auto_plan: autoPlan
+    };
     setDraftProgress(draftProgressForElapsed(0, autoPlan));
+    setDraftTask(null);
     try {
-      const result = await draftNovel({
-        chapter_text: chapterText,
-        title: chapterTitle.trim() || undefined,
-        target_minutes: Number(targetMinutes),
-        shot_seconds: Number(shotSeconds),
-        provider: provider.trim() || project.config.default_video_provider,
-        analyzer: "codex",
-        auto_plan: autoPlan
-      });
-      setDraftProgress({ percent: 100, label: "草稿生成完成", detail: "章节分镜、人物档案和场景档案已整理完成" });
-      setDraft(result);
+      const task = await enqueueTask(project.name, "novel-draft", payload, "生成章节草稿");
+      setDraftTask(task);
+      setWatchDraftTaskId(task.id);
+      writeNovelDraftTask(project.name, task.id);
       setDraftApplied(false);
-      setMessage(
-        `章节草稿已生成：${formatDuration(result.meta.duration)} · ${result.meta.shot_count} 个分镜 · ${novelAnalyzerLabel(result.meta)}`
-      );
+      setMessage("章节草稿生成任务已创建，刷新页面后会继续显示状态");
     } catch (failure) {
       const message = friendlyError(failure);
       setError(message);
       setMessage(message);
+      setDraftProgress(null);
     } finally {
       setBusy("");
-      progressHideTimer.current = window.setTimeout(() => {
-        setDraftProgress(null);
-        progressHideTimer.current = null;
-      }, 450);
     }
   }
 
@@ -1156,9 +1267,9 @@ function NovelChapterPanel() {
             <LabeledInput label={autoPlan ? "参考单镜秒" : "单镜基准秒"} type="number" disabled={autoPlan} value={shotSeconds} onChange={setShotSeconds} />
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="btn btn-primary" disabled={busy === "draft" || !chapterText.trim()} onClick={generateDraft} type="button">
-              {busy === "draft" ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
-              生成章节草稿
+            <button className="btn btn-primary" disabled={draftGenerating || !chapterText.trim()} onClick={generateDraft} type="button">
+              {draftGenerating ? <Loader2 className="animate-spin" size={17} /> : <Sparkles size={17} />}
+              {draftGenerating ? "正在生成草稿" : "生成章节草稿"}
             </button>
             <button className="btn" disabled={busy === "apply" || !draft || draftApplied} onClick={applyDraft} type="button">
               {busy === "apply" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
@@ -1169,7 +1280,7 @@ function NovelChapterPanel() {
               {draftApplied ? "开始生产" : "应用并开始生产"}
             </button>
           </div>
-          {draftProgress ? <DraftGenerationProgress progress={draftProgress} /> : null}
+          {displayedDraftProgress ? <DraftGenerationProgress progress={displayedDraftProgress} /> : null}
           {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         </div>
       </article>
@@ -1302,6 +1413,19 @@ function DraftGenerationProgress({ progress }: { progress: DraftProgressState })
       </div>
     </div>
   );
+}
+
+function isActiveTask(task: WebTask) {
+  return task.status === "queued" || task.status === "running";
+}
+
+function novelDraftResultFromTask(task: WebTask): NovelDraftResult | null {
+  const result = task.result;
+  if (!result || typeof result !== "object") return null;
+  const candidate = result as Partial<NovelDraftResult>;
+  if (!candidate.chapter || !candidate.meta || !Array.isArray(candidate.shots)) return null;
+  if (!Array.isArray(candidate.characters) || !Array.isArray(candidate.scenes) || !candidate.novel) return null;
+  return candidate as NovelDraftResult;
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
