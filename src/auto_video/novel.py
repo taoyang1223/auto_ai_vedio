@@ -9,6 +9,7 @@ from typing import Any
 from .errors import ConfigError
 from .jobs import utc_now_iso
 from .models import Project
+from .novel_analyzer import analyze_novel_with_codex
 from .project import load_project
 from .validation import validate_project
 
@@ -45,6 +46,23 @@ NAME_STOPWORDS = {
     "突然",
     "终于",
     "只是",
+    "或者",
+    "那里",
+    "这里",
+    "手里",
+    "视野",
+    "床边",
+    "他手里",
+    "她手里",
+}
+
+SCENE_FALSE_POSITIVES = {
+    "他手里",
+    "她手里",
+    "视野里",
+    "视野里缓慢聚焦",
+    "冷色月光",
+    "暖色烛火",
 }
 
 
@@ -78,9 +96,23 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
     provider = str(payload.get("provider") or project.config.default_video_provider).strip()
 
     store = load_novel_store(project.config.root)
-    characters = _merge_characters(store.get("characters", []), chapter_text)
-    scenes = _merge_scenes(store.get("scenes", []), chapter_text)
-    beats = _beats_for_count(chapter_text, shot_count)
+    analysis = analyze_novel_with_codex(
+        analyzer=str(payload.get("analyzer") or ""),
+        chapter_text=chapter_text,
+        existing_store=store,
+        project_root=Path(project.config.root),
+        provider=provider,
+        shot_count=shot_count,
+        target_minutes=target_minutes,
+    )
+    if analysis.data:
+        characters = _merge_analyzed_characters(store.get("characters", []), analysis.data.get("characters", []), chapter_text)
+        scenes = _merge_analyzed_scenes(store.get("scenes", []), analysis.data.get("scenes", []), chapter_text)
+        beats = _beats_from_analysis(analysis.data, chapter_text, shot_count)
+    else:
+        characters = _merge_characters(store.get("characters", []), chapter_text)
+        scenes = _merge_scenes(store.get("scenes", []), chapter_text)
+        beats = _beats_for_count(chapter_text, shot_count)
     shots = [
         _shot_payload(
             project,
@@ -121,6 +153,8 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
             "shot_count": len(shots),
             "shot_seconds": shot_seconds,
             "provider": provider,
+            "analyzer": analysis.source,
+            "analyzer_error": analysis.error,
         },
         "novel": next_store,
     }
@@ -176,6 +210,39 @@ def _clean_list(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in value] if isinstance(value, list) else []
 
 
+def _clean_text(value: Any, *, limit: int = 240) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").replace("\u3000", " ")).strip()
+    text = text.strip(" \t\r\n，,。.!！?？；;：:、")
+    return _truncate(text, limit) if limit else text
+
+
+def _clean_entity_name(value: Any) -> str:
+    text = _clean_text(value, limit=40)
+    text = text.strip("“”\"'「」『』（）()[]【】")
+    text = re.sub(r"^(?:一个|一名|一位|这位|那位|那个|这个)", "", text)
+    text = text.replace("床边的", "床边").replace("陌生的", "陌生")
+    return text.strip(" 的")
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
+def _normalize_gender(value: Any) -> str:
+    raw = str(value or "").strip().lower()
+    if raw in {"male", "man", "男性", "男"}:
+        return "male"
+    if raw in {"female", "woman", "女性", "女"}:
+        return "female"
+    if raw in {"neutral", "unknown", "旁白", "中性", "未知"}:
+        return "neutral"
+    return ""
+
+
 def _normalize_chapter(value: str) -> str:
     lines = [line.strip() for line in value.replace("\u3000", " ").splitlines()]
     return "\n".join(line for line in lines if line).strip()
@@ -209,6 +276,34 @@ def _merge_characters(existing: list[dict[str, Any]], text: str) -> list[dict[st
     return [_normalize_character(item, index) for index, item in enumerate(by_name.values())]
 
 
+def _merge_analyzed_characters(existing: list[dict[str, Any]], analyzed: Any, text: str) -> list[dict[str, Any]]:
+    by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
+    if NARRATOR_NAME not in by_name:
+        by_name[NARRATOR_NAME] = _character_payload(NARRATOR_NAME, len(by_name), gender="neutral", character_id=NARRATOR_ID)
+    if isinstance(analyzed, list):
+        for item in analyzed:
+            if not isinstance(item, dict):
+                continue
+            name = _clean_entity_name(item.get("name"))
+            if not _is_valid_analyzed_character_name(name):
+                continue
+            if name in by_name:
+                continue
+            gender = _normalize_gender(item.get("gender")) or _infer_gender(name, text)
+            payload = _character_payload(name, len(by_name), gender=gender)
+            for key in ("visual_profile", "wardrobe_profile", "voice_profile"):
+                value = _clean_text(item.get(key), limit=420)
+                if value:
+                    payload[key] = value
+            aliases = [_clean_entity_name(alias) for alias in item.get("aliases", [])] if isinstance(item.get("aliases"), list) else []
+            aliases = [alias for alias in aliases if alias and alias not in NAME_STOPWORDS]
+            payload["aliases"] = _dedupe([name, *aliases])
+            by_name[name] = payload
+    if len(by_name) <= 1:
+        return _merge_characters(existing, text)
+    return [_normalize_character(item, index) for index, item in enumerate(by_name.values())]
+
+
 def _candidate_names(text: str) -> list[str]:
     candidates: list[str] = []
     patterns = [
@@ -230,6 +325,16 @@ def _is_probable_name(value: str) -> bool:
     if any(word in value for word in NAME_STOPWORDS):
         return False
     return bool(re.fullmatch(r"[\u4e00-\u9fff]+", value))
+
+
+def _is_valid_analyzed_character_name(value: str) -> bool:
+    if not value or len(value) < 2 or len(value) > 12:
+        return False
+    if value in NAME_STOPWORDS or value in SCENE_FALSE_POSITIVES:
+        return False
+    if re.search(r"(或者|然后|于是|突然|终于|只是|视野|手里|眼神|声音|时候|这里|那里)", value):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]", value))
 
 
 def _infer_gender(name: str, text: str) -> str:
@@ -318,6 +423,38 @@ def _merge_scenes(existing: list[dict[str, Any]], text: str) -> list[dict[str, A
     return [_normalize_scene(item, index) for index, item in enumerate(by_name.values())]
 
 
+def _merge_analyzed_scenes(existing: list[dict[str, Any]], analyzed: Any, text: str) -> list[dict[str, Any]]:
+    by_name = {str(item.get("name")): dict(item) for item in existing if item.get("name")}
+    if isinstance(analyzed, list):
+        for item in analyzed:
+            if not isinstance(item, dict):
+                continue
+            name = _clean_entity_name(item.get("name"))
+            if not _is_valid_analyzed_scene_name(name):
+                continue
+            if name in by_name:
+                continue
+            payload = _scene_payload(name, len(by_name), context=_near_text(name, text))
+            for key in ("style_prompt", "lighting", "continuity", "wardrobe_prompt"):
+                value = _clean_text(item.get(key), limit=520)
+                if value:
+                    payload[key] = value
+            by_name[name] = payload
+    if not by_name:
+        return _merge_scenes(existing, text)
+    return [_normalize_scene(item, index) for index, item in enumerate(by_name.values())]
+
+
+def _is_valid_analyzed_scene_name(value: str) -> bool:
+    if not value or len(value) < 2 or len(value) > 24:
+        return False
+    if value in NAME_STOPWORDS or value in SCENE_FALSE_POSITIVES:
+        return False
+    if re.search(r"(或者|然后|于是|看着|摸索|聚焦|眼神|声音|手里|视野|温柔|冷色月光|暖色烛火)$", value):
+        return False
+    return bool(re.search(r"[\u4e00-\u9fffA-Za-z0-9]", value))
+
+
 def _candidate_scenes(text: str) -> list[str]:
     candidates: list[str] = []
     for pattern in (r"(?:在|来到|回到|进入|走进)([\u4e00-\u9fff]{2,14})", r"([\u4e00-\u9fff]{2,10})(?:中|里|内|外)，"):
@@ -391,10 +528,49 @@ def _beats_for_count(text: str, count: int) -> list[str]:
     return [_truncate(beat, 220) for beat in beats]
 
 
+def _beats_from_analysis(analysis: dict[str, Any], text: str, count: int) -> list[dict[str, Any] | str]:
+    raw_beats = analysis.get("beats")
+    plans: list[dict[str, Any]] = []
+    if isinstance(raw_beats, list):
+        for item in raw_beats:
+            if not isinstance(item, dict):
+                continue
+            summary = _clean_text(item.get("summary"), limit=260)
+            if not summary:
+                continue
+            plans.append(
+                {
+                    "summary": summary,
+                    "scene": _clean_entity_name(item.get("scene")),
+                    "speaker": _clean_entity_name(item.get("speaker")),
+                    "characters": [_clean_entity_name(name) for name in item.get("characters", [])]
+                    if isinstance(item.get("characters"), list)
+                    else [],
+                    "visual_prompt": _clean_text(item.get("visual_prompt"), limit=620),
+                    "camera_motion": _clean_text(item.get("camera_motion"), limit=180),
+                    "environment_motion": _clean_text(item.get("environment_motion"), limit=220),
+                    "performance": _clean_text(item.get("performance"), limit=220),
+                    "lighting": _clean_text(item.get("lighting"), limit=160),
+                    "audio_intent": _clean_text(item.get("audio_intent"), limit=220),
+                    "wardrobe": _clean_text(item.get("wardrobe"), limit=260),
+                }
+            )
+    fallback = _beats_for_count(text, count)
+    if not plans:
+        return fallback
+    while len(plans) < count:
+        index = len(plans)
+        plans.append({"summary": fallback[index] if index < len(fallback) else plans[-1]["summary"]})
+    if len(plans) > count:
+        tail = " ".join(str(item.get("summary") or "") for item in plans[count - 1 :])
+        plans = [*plans[: count - 1], {**plans[count - 1], "summary": _truncate(tail, 260)}]
+    return plans[:count]
+
+
 def _shot_payload(
     project: Project,
     *,
-    beat: str,
+    beat: str | dict[str, Any],
     index: int,
     total: int,
     duration: float,
@@ -402,38 +578,80 @@ def _shot_payload(
     characters: list[dict[str, Any]],
     scenes: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    speaker = _speaker_for_beat(beat, characters)
-    scene = _scene_for_beat(beat, scenes)
-    visible = _visible_characters(beat, characters, speaker)
+    beat_text = _beat_text(beat)
+    speaker = _speaker_for_beat_plan(beat, characters)
+    scene = _scene_for_beat_plan(beat, scenes)
+    visible = _visible_characters_plan(beat, characters, speaker)
     character_lines = [str(item.get("visual_profile") or item.get("name")) for item in visible]
     scene_line = str(scene.get("style_prompt") or scene.get("name"))
-    wardrobe_line = "；".join(_wardrobe_for_scene(item, scene) for item in visible)
+    wardrobe_line = _wardrobe_line_for_beat(beat, visible, scene)
     dialogue_cue = "口型与配音台词同步，表情随语气变化" if speaker.get("id") != NARRATOR_ID else "人物动作与旁白节奏同步，场景细节跟随叙事变化"
+    visual_prompt = _visual_prompt_for_beat(project, beat, scene_line, character_lines, wardrobe_line, beat_text)
     return {
         "id": f"S{index + 1:03d}",
-        "title": f"第{index + 1:03d}镜 · {_truncate(beat, 16)}",
+        "title": f"第{index + 1:03d}镜 · {_truncate(beat_text, 16)}",
         "duration": duration,
-        "intent": beat,
+        "intent": beat_text,
         "provider": provider,
         "characters": [str(item.get("id")) for item in visible],
         "scene": str(scene.get("id") or ""),
         "speaker": str(speaker.get("id") or NARRATOR_ID),
         "voice": str(speaker.get("voice") or NEUTRAL_VOICES[0]),
         "wardrobe": wardrobe_line,
-        "visual_prompt": (
-            f"原创小说章节镜头，{project.config.aspect_ratio}，场景：{scene_line}。"
-            f"人物：{'；'.join(character_lines)}。服装：{wardrobe_line}。剧情：{beat}。"
-            "电影感叙事画面，角色外形严格一致，服装必须与当前场景、天气和身份状态对应，场景风格严格一致，动作自然连贯"
-        ),
-        "camera_motion": _camera_for_index(index, total),
-        "environment_motion": f"{scene.get('name')}内的光影、风、尘埃或道具随旁白节奏轻微运动",
-        "performance": f"{speaker.get('name')}作为当前声音焦点；{dialogue_cue}",
-        "lighting": str(scene.get("lighting") or "cinematic soft light"),
-        "audio_intent": f"说话人={speaker.get('name')}，音色={speaker.get('voice_profile')}，旁白/对白与画面动作同步",
-        "subtitle": beat,
+        "visual_prompt": visual_prompt,
+        "camera_motion": _beat_field(beat, "camera_motion") or _camera_for_index(index, total),
+        "environment_motion": _beat_field(beat, "environment_motion") or f"{scene.get('name')}内的光影、风、尘埃或道具随旁白节奏轻微运动",
+        "performance": _beat_field(beat, "performance") or f"{speaker.get('name')}作为当前声音焦点；{dialogue_cue}",
+        "lighting": _beat_field(beat, "lighting") or str(scene.get("lighting") or "cinematic soft light"),
+        "audio_intent": _beat_field(beat, "audio_intent")
+        or f"说话人={speaker.get('name')}，音色={speaker.get('voice_profile')}，旁白/对白与画面动作同步",
+        "subtitle": beat_text,
         "negative_prompt": BASE_NEGATIVE,
         "refs": _refs_for_shot(visible, scene),
     }
+
+
+def _beat_text(beat: str | dict[str, Any]) -> str:
+    if isinstance(beat, dict):
+        return _clean_text(beat.get("summary"), limit=260) or "本镜剧情"
+    return str(beat)
+
+
+def _beat_field(beat: str | dict[str, Any], key: str) -> str:
+    if not isinstance(beat, dict):
+        return ""
+    return _clean_text(beat.get(key), limit=420)
+
+
+def _visual_prompt_for_beat(
+    project: Project,
+    beat: str | dict[str, Any],
+    scene_line: str,
+    character_lines: list[str],
+    wardrobe_line: str,
+    beat_text: str,
+) -> str:
+    analyzed = _beat_field(beat, "visual_prompt")
+    if analyzed:
+        return (
+            f"原创小说章节镜头，{project.config.aspect_ratio}，{analyzed}。"
+            f"场景：{scene_line}。人物：{'；'.join(character_lines)}。"
+            f"服装：{wardrobe_line}。剧情：{beat_text}。"
+            "电影感叙事画面，角色外形严格一致，服装与场景天气和身份状态对应，动作、口型、表情与配音同步"
+        )
+    return (
+        f"原创小说章节镜头，{project.config.aspect_ratio}，场景：{scene_line}。"
+        f"人物：{'；'.join(character_lines)}。服装：{wardrobe_line}。剧情：{beat_text}。"
+        "电影感叙事画面，角色外形严格一致，服装必须与当前场景、天气和身份状态对应，场景风格严格一致，动作自然连贯"
+    )
+
+
+def _wardrobe_line_for_beat(beat: str | dict[str, Any], visible: list[dict[str, Any]], scene: dict[str, Any]) -> str:
+    base = "；".join(_wardrobe_for_scene(item, scene) for item in visible)
+    analyzed = _beat_field(beat, "wardrobe")
+    if analyzed and base:
+        return f"{analyzed}；穿搭规则：{base}"
+    return base or analyzed
 
 
 def _wardrobe_for_scene(character: dict[str, Any], scene: dict[str, Any]) -> str:
@@ -469,6 +687,74 @@ def _visible_characters(beat: str, characters: list[dict[str, Any]], speaker: di
     if speaker.get("id") != NARRATOR_ID and speaker not in visible:
         visible.insert(0, speaker)
     return visible[:3] or [item for item in characters if item.get("id") != NARRATOR_ID][:1] or [characters[0]]
+
+
+def _speaker_for_beat_plan(beat: str | dict[str, Any], characters: list[dict[str, Any]]) -> dict[str, Any]:
+    if isinstance(beat, dict):
+        speaker = _match_character(beat.get("speaker"), characters)
+        if speaker is not None:
+            return speaker
+    return _speaker_for_beat(_beat_text(beat), characters)
+
+
+def _scene_for_beat_plan(beat: str | dict[str, Any], scenes: list[dict[str, Any]]) -> dict[str, Any]:
+    if isinstance(beat, dict):
+        scene = _match_scene(beat.get("scene"), scenes)
+        if scene is not None:
+            return scene
+    return _scene_for_beat(_beat_text(beat), scenes)
+
+
+def _visible_characters_plan(beat: str | dict[str, Any], characters: list[dict[str, Any]], speaker: dict[str, Any]) -> list[dict[str, Any]]:
+    visible: list[dict[str, Any]] = []
+    if isinstance(beat, dict) and isinstance(beat.get("characters"), list):
+        for name in beat.get("characters", []):
+            character = _match_character(name, characters)
+            if character is not None and character.get("id") != NARRATOR_ID and character not in visible:
+                visible.append(character)
+    if speaker.get("id") != NARRATOR_ID and speaker not in visible:
+        visible.insert(0, speaker)
+    return visible[:4] or _visible_characters(_beat_text(beat), characters, speaker)
+
+
+def _match_character(value: Any, characters: list[dict[str, Any]]) -> dict[str, Any] | None:
+    name = _clean_entity_name(value)
+    if not name:
+        return None
+    if name in {NARRATOR_ID, NARRATOR_NAME, "narrator"}:
+        return next((item for item in characters if item.get("id") == NARRATOR_ID or item.get("name") == NARRATOR_NAME), characters[0])
+    for character in characters:
+        keys = _character_match_keys(character)
+        if name in keys:
+            return character
+    for character in characters:
+        base_name = str(character.get("name") or "")
+        if base_name and (base_name in name or name in base_name):
+            return character
+    return None
+
+
+def _character_match_keys(character: dict[str, Any]) -> set[str]:
+    keys = {_clean_entity_name(character.get("id")), _clean_entity_name(character.get("name"))}
+    aliases = character.get("aliases")
+    if isinstance(aliases, list):
+        keys.update(_clean_entity_name(alias) for alias in aliases)
+    return {key for key in keys if key}
+
+
+def _match_scene(value: Any, scenes: list[dict[str, Any]]) -> dict[str, Any] | None:
+    name = _clean_entity_name(value)
+    if not name:
+        return None
+    for scene in scenes:
+        keys = {_clean_entity_name(scene.get("id")), _clean_entity_name(scene.get("name"))}
+        if name in keys:
+            return scene
+    for scene in scenes:
+        scene_name = str(scene.get("name") or "")
+        if scene_name and (scene_name in name or name in scene_name):
+            return scene
+    return None
 
 
 def _refs_for_shot(characters: list[dict[str, Any]], scene: dict[str, Any]) -> list[dict[str, str]]:

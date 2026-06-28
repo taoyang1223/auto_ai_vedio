@@ -994,11 +994,12 @@ function NovelChapterPanel() {
         title: chapterTitle.trim() || undefined,
         target_minutes: Number(targetMinutes),
         shot_seconds: Number(shotSeconds),
-        provider: provider.trim() || project.config.default_video_provider
+        provider: provider.trim() || project.config.default_video_provider,
+        analyzer: "codex"
       });
       setDraft(result);
       setDraftApplied(false);
-      setMessage(`章节草稿已生成：${result.meta.shot_count} 个分镜`);
+      setMessage(`章节草稿已生成：${result.meta.shot_count} 个分镜 · ${novelAnalyzerLabel(result.meta.analyzer)}`);
     } catch (failure) {
       const message = friendlyError(failure);
       setError(message);
@@ -1230,6 +1231,12 @@ function genderLabel(value: string) {
   if (value === "female") return "女性";
   if (value === "male") return "男性";
   return "旁白/中性";
+}
+
+function novelAnalyzerLabel(value?: string) {
+  if (value === "codex") return "Codex 分析";
+  if (value === "rules_fallback") return "Codex 回退到规则";
+  return "规则分析";
 }
 
 function formatDuration(seconds: number) {
