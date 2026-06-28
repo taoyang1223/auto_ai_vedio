@@ -908,7 +908,34 @@ type NovelChapterFormDraft = {
   autoPlan: boolean;
 };
 
+type DraftProgressState = {
+  percent: number;
+  label: string;
+  detail: string;
+};
+
 const NOVEL_CHAPTER_FORM_PREFIX = "auto-ai-video:novel-chapter-form:";
+
+const draftProgressStages = [
+  { at: 0, label: "准备章节内容", detail: "正在整理正文、章节标题和视频服务参数" },
+  { at: 12, label: "分析章节结构", detail: "正在识别剧情节拍、对白密度和场景变化" },
+  { at: 32, label: "规划视频时长", detail: "Codex 正在判断合适的目标时长与分镜数量" },
+  { at: 52, label: "抽取档案", detail: "正在整理人物、音色、场景和服装一致性" },
+  { at: 72, label: "生成分镜", detail: "正在写入镜头提示词、动作、表情和口型要求" },
+  { at: 88, label: "整理草稿", detail: "正在生成项目可应用的分镜与生产档案" }
+];
+
+function draftProgressForElapsed(elapsedMs: number, autoPlan: boolean): DraftProgressState {
+  const percent = Math.min(94, Math.max(4, Math.round(100 * (1 - Math.exp(-elapsedMs / 42000)))));
+  const stage = [...draftProgressStages].reverse().find((item) => percent >= item.at) || draftProgressStages[0];
+  if (!autoPlan && stage.label === "规划视频时长") {
+    return { percent, label: "套用手动规划", detail: "正在按目标分钟和单镜秒数拆分镜头" };
+  }
+  if (percent >= 92) {
+    return { percent, label: "等待 Codex 返回", detail: "分析接近完成，正在等待服务返回结构化草稿" };
+  }
+  return { percent, label: stage.label, detail: stage.detail };
+}
 
 function novelChapterFormKey(projectName: string) {
   return `${NOVEL_CHAPTER_FORM_PREFIX}${projectName}`;
@@ -947,7 +974,9 @@ function NovelChapterPanel() {
   const [draftApplied, setDraftApplied] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [draftProgress, setDraftProgress] = useState<DraftProgressState | null>(null);
   const skipFormSave = useRef<string | null>(null);
+  const progressHideTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (!detail) return;
@@ -962,7 +991,18 @@ function NovelChapterPanel() {
     setDraft(null);
     setDraftApplied(false);
     setError("");
+    setDraftProgress(null);
   }, [detail?.name]);
+
+  useEffect(() => {
+    if (busy !== "draft") return;
+    const startedAt = Date.now();
+    setDraftProgress(draftProgressForElapsed(0, autoPlan));
+    const timer = window.setInterval(() => {
+      setDraftProgress(draftProgressForElapsed(Date.now() - startedAt, autoPlan));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [busy, autoPlan]);
 
   useEffect(() => {
     if (!detail) return;
@@ -992,6 +1032,11 @@ function NovelChapterPanel() {
   async function generateDraft() {
     setBusy("draft");
     setError("");
+    if (progressHideTimer.current !== null) {
+      window.clearTimeout(progressHideTimer.current);
+      progressHideTimer.current = null;
+    }
+    setDraftProgress(draftProgressForElapsed(0, autoPlan));
     try {
       const result = await draftNovel({
         chapter_text: chapterText,
@@ -1002,6 +1047,7 @@ function NovelChapterPanel() {
         analyzer: "codex",
         auto_plan: autoPlan
       });
+      setDraftProgress({ percent: 100, label: "草稿生成完成", detail: "章节分镜、人物档案和场景档案已整理完成" });
       setDraft(result);
       setDraftApplied(false);
       setMessage(
@@ -1013,6 +1059,10 @@ function NovelChapterPanel() {
       setMessage(message);
     } finally {
       setBusy("");
+      progressHideTimer.current = window.setTimeout(() => {
+        setDraftProgress(null);
+        progressHideTimer.current = null;
+      }, 450);
     }
   }
 
@@ -1119,6 +1169,7 @@ function NovelChapterPanel() {
               {draftApplied ? "开始生产" : "应用并开始生产"}
             </button>
           </div>
+          {draftProgress ? <DraftGenerationProgress progress={draftProgress} /> : null}
           {error ? <div className="whitespace-pre-wrap rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div> : null}
         </div>
       </article>
@@ -1227,6 +1278,29 @@ function NovelChapterPanel() {
         </article>
       </aside>
     </section>
+  );
+}
+
+function DraftGenerationProgress({ progress }: { progress: DraftProgressState }) {
+  return (
+    <div className="rounded-lg border border-teal-100 bg-teal-50/70 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Loader2 className="shrink-0 animate-spin text-teal-700" size={16} />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-teal-900">{progress.label}</div>
+            <div className="truncate text-xs text-teal-700">{progress.detail}</div>
+          </div>
+        </div>
+        <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-semibold text-teal-800">{progress.percent}%</span>
+      </div>
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className="h-full rounded-full bg-teal-700 transition-[width] duration-500 ease-out"
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
