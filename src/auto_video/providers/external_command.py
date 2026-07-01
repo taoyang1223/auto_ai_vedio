@@ -106,6 +106,9 @@ class ExternalCommandProvider:
                 error=f"external command did not create output {output_path.as_posix()}",
                 metadata=metadata,
             )
+        actual_duration = _media_duration_seconds(output_path)
+        if actual_duration is not None:
+            metadata["media"] = {"duration": actual_duration}
         return ProviderResult(
             job_id=job.id,
             shot_id=job.shot_id,
@@ -113,7 +116,7 @@ class ExternalCommandProvider:
             provider=self.name,
             status="succeeded",
             path=output_path,
-            duration=job.duration,
+            duration=actual_duration if actual_duration is not None else job.duration,
             metadata=metadata,
         )
 
@@ -187,3 +190,33 @@ def _snippet(value: str | bytes | None) -> str:
     if len(stripped) <= SNIPPET_LIMIT:
         return stripped
     return stripped[: SNIPPET_LIMIT - 3] + "..."
+
+
+def _media_duration_seconds(path: Path) -> float | None:
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                path.as_posix(),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        value = json.loads(completed.stdout or "{}").get("format", {}).get("duration")
+        duration = float(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return round(duration, 3) if duration > 0 else None

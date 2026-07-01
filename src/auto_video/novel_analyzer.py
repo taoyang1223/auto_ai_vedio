@@ -93,6 +93,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                 ],
                 "properties": {
                     "summary": {"type": "string"},
+                    "duration_seconds": {"type": "number", "minimum": 2, "maximum": 18},
                     "scene": {"type": "string"},
                     "speaker": {"type": "string"},
                     "characters": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
@@ -221,8 +222,10 @@ def _analysis_prompt(
 7. 每个 beat 的 visual_prompt 要是适合 ComfyUI/Wan 视频生成的关键词式描述：场景、人物、动作、表情、口型/旁白同步、服装适配、镜头、光线都要清楚；避免空泛形容。
 8. 每个 beat 的 speaker 如果是对白，填说话人物；如果是旁白或环境叙事，填“旁白”。
 9. characters 字段填画面中可见人物名，最多 6 个；不要填“他/她/他们”。
-10. production_plan 必须根据本章内容决定：对白密度高、情绪转折多、场景切换多则更长且分镜更多；叙述少、动作单一则更短。target_minutes 范围 1-60，shot_seconds 范围 4-30，shot_count 范围 1-180。
+10. production_plan 必须根据本章内容决定：对白密度高、情绪转折多、场景切换多则更长且分镜更多；叙述少、动作单一则更短。target_minutes 范围 1-60，shot_seconds 范围 4-30，shot_count 范围 1-180。若 180 个镜头无法承载完整长视频，请选择当前章节片段可稳定完成的时长，并在 rationale 中说明应拆成多段生产。
 11. beats 数量必须等于 production_plan.shot_count。每个 beat 应对应一个可生成视频镜头，不要为了凑数复制同一句。
+12. 每个 beat 可填写 duration_seconds：对白/口型特写建议 3.5-4.2 秒，一句对白拆成一个镜头；旁白、动作、环境镜头建议 5-8 秒，慢速建立镜头最多 12 秒。不要把多个动作转折塞进一个长镜头。
+13. visual_prompt 要优先写一个清晰可拍动作，格式尽量紧凑：空间 + 主体人物 + 正在发生的一件事 + 表情/口型 + 服装 + 镜头 + 光线。避免把摘要、抽象主题、历史解释直接当画面。
 
 视频规划模式：
 - {"Codex 自动判断最终时长与分镜数量" if auto_plan else "参考下方目标，除非明显不合理才微调"}

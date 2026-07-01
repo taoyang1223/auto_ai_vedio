@@ -11,13 +11,17 @@ from .jobs import utc_now_iso
 from .models import Project
 from .novel_analyzer import analyze_novel_with_codex
 from .project import load_project
+from .shot_policy import shot_needs_lipsync
 from .validation import validate_project
 
 NOVEL_FILE = "novel.json"
 MAX_CHAPTER_CHARS = 120_000
 MAX_NOVEL_SHOTS = 180
 DEFAULT_TARGET_MINUTES = 20.0
-DEFAULT_SHOT_SECONDS = 12.0
+DEFAULT_SHOT_SECONDS = 6.0
+DEFAULT_WAN_SHOT_SECONDS = 6.0
+MAX_WAN_VIDEO_SECONDS = 14.0
+MAX_LIPSYNC_SHOT_SECONDS = 4.2
 BASE_NEGATIVE = "text, watermark, logo, bad hands, extra fingers, distorted body, low quality, blurry, identity drift"
 
 NARRATOR_ID = "narrator"
@@ -148,11 +152,16 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
         raise ConfigError("章节内容过长", fix=f"请把单章正文控制在 {MAX_CHAPTER_CHARS} 字以内，或拆成上下集。")
 
     target_minutes = _bounded_float(payload.get("target_minutes"), default=DEFAULT_TARGET_MINUTES, minimum=1, maximum=60)
-    preferred_shot_seconds = _bounded_float(payload.get("shot_seconds"), default=DEFAULT_SHOT_SECONDS, minimum=4, maximum=30)
+    provider = str(payload.get("provider") or project.config.default_video_provider).strip()
+    preferred_shot_seconds = _bounded_float(
+        payload.get("shot_seconds"),
+        default=_default_shot_seconds_for_provider(provider),
+        minimum=4,
+        maximum=30,
+    )
     target_seconds = target_minutes * 60
     shot_count = _target_shot_count(chapter_text, target_seconds, preferred_shot_seconds)
     shot_seconds = round(target_seconds / shot_count, 2)
-    provider = str(payload.get("provider") or project.config.default_video_provider).strip()
     auto_plan = _bool(payload.get("auto_plan"), default=bool(str(payload.get("analyzer") or "").strip()))
 
     store = load_novel_store(project.config.root)
@@ -186,8 +195,9 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
         characters = _merge_characters(analysis_store.get("characters", []), chapter_text)
         scenes = _merge_scenes(analysis_store.get("scenes", []), chapter_text)
         beats = _beats_for_count(chapter_text, shot_count)
-    shots = [
-        _shot_payload(
+    shots = []
+    for index, beat in enumerate(beats):
+        shot = _shot_payload(
             project,
             beat=beat,
             index=index,
@@ -197,14 +207,14 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
             characters=characters,
             scenes=scenes,
         )
-        for index, beat in enumerate(beats)
-    ]
+        shots.append(shot)
+    actual_duration = round(sum(float(shot["duration"]) for shot in shots), 2)
     chapter_id = _chapter_id(store, payload)
     chapter = {
         "id": chapter_id,
         "title": str(payload.get("title") or f"第{len(store.get('chapters', [])) + 1}章").strip(),
         "target_minutes": target_minutes,
-        "duration": round(sum(float(shot["duration"]) for shot in shots), 2),
+        "duration": actual_duration,
         "shot_count": len(shots),
         "source_chars": len(chapter_text),
         "created_at": utc_now_iso(),
@@ -224,12 +234,14 @@ def draft_novel_chapter(project: Project, payload: dict[str, Any]) -> dict[str, 
             "target_minutes": target_minutes,
             "duration": chapter["duration"],
             "shot_count": len(shots),
-            "shot_seconds": shot_seconds,
+            "shot_seconds": round(actual_duration / max(len(shots), 1), 2),
+            "requested_shot_seconds": preferred_shot_seconds,
             "provider": provider,
             "analyzer": analysis.source,
             "analyzer_error": analysis.error,
             "auto_plan": auto_plan,
             "plan_rationale": plan_rationale,
+            "duration_note": _duration_note(target_minutes, actual_duration, provider),
         },
         "novel": next_store,
     }
@@ -379,6 +391,30 @@ def _target_shot_count(text: str, target_seconds: float, preferred_shot_seconds:
     duration_count = math.ceil(target_seconds / preferred_shot_seconds)
     text_count = math.ceil(len(text) / 58)
     return max(1, min(MAX_NOVEL_SHOTS, max(duration_count, text_count)))
+
+
+def _default_shot_seconds_for_provider(provider: str) -> float:
+    provider_key = provider.casefold()
+    if "wan" in provider_key or "comfyui" in provider_key:
+        return DEFAULT_WAN_SHOT_SECONDS
+    return DEFAULT_SHOT_SECONDS
+
+
+def _max_video_seconds_for_provider(provider: str) -> float:
+    provider_key = provider.casefold()
+    if "wan" in provider_key or "comfyui" in provider_key:
+        return MAX_WAN_VIDEO_SECONDS
+    return 30.0
+
+
+def _duration_note(target_minutes: float, actual_duration: float, provider: str) -> str:
+    target_seconds = target_minutes * 60
+    if actual_duration >= target_seconds * 0.85:
+        return ""
+    return (
+        f"当前 {provider} 工作流按稳定镜头时长规划后约 {actual_duration / 60:.1f} 分钟；"
+        "如需更长成片，建议把章节拆成多个生产批次或提高最大分镜数。"
+    )
 
 
 def _production_plan_from_analysis(
@@ -805,6 +841,9 @@ def _beats_from_analysis(analysis: dict[str, Any], text: str, count: int) -> lis
             plans.append(
                 {
                     "summary": summary,
+                    "duration_seconds": _plan_float(item.get("duration_seconds"), default=0, minimum=0, maximum=18)
+                    if item.get("duration_seconds") is not None
+                    else 0,
                     "scene": _clean_entity_name(item.get("scene")),
                     "speaker": _clean_entity_name(item.get("speaker")),
                     "characters": [_clean_entity_name(name) for name in item.get("characters", [])]
@@ -846,6 +885,12 @@ def _shot_payload(
     speaker = _speaker_for_beat_plan(beat, characters)
     scene = _scene_for_beat_plan(beat, scenes)
     visible = _visible_characters_plan(beat, characters, speaker)
+    shot_duration = _duration_for_beat(
+        beat,
+        fallback=duration,
+        provider=provider,
+        needs_lipsync=_speaker_needs_lipsync(project, speaker),
+    )
     character_lines = [str(item.get("visual_profile") or item.get("name")) for item in visible]
     scene_line = str(scene.get("style_prompt") or scene.get("name"))
     wardrobe_line = _wardrobe_line_for_beat(beat, visible, scene)
@@ -854,7 +899,7 @@ def _shot_payload(
     return {
         "id": f"S{index + 1:03d}",
         "title": f"第{index + 1:03d}镜 · {_truncate(beat_text, 16)}",
-        "duration": duration,
+        "duration": shot_duration,
         "intent": beat_text,
         "provider": provider,
         "characters": [str(item.get("id")) for item in visible],
@@ -885,6 +930,29 @@ def _beat_field(beat: str | dict[str, Any], key: str) -> str:
     if not isinstance(beat, dict):
         return ""
     return _clean_text(beat.get(key), limit=420)
+
+
+def _duration_for_beat(
+    beat: str | dict[str, Any],
+    *,
+    fallback: float,
+    provider: str,
+    needs_lipsync: bool,
+) -> float:
+    raw = beat.get("duration_seconds") if isinstance(beat, dict) else None
+    planned = _plan_float(raw, default=fallback, minimum=2, maximum=30) if raw else fallback
+    max_duration = _max_video_seconds_for_provider(provider)
+    if needs_lipsync:
+        max_duration = min(max_duration, MAX_LIPSYNC_SHOT_SECONDS)
+    return round(max(2.0, min(max_duration, planned)), 2)
+
+
+def _speaker_needs_lipsync(project: Project, speaker: dict[str, Any]) -> bool:
+    if project.config.default_lipsync_provider == "mock":
+        return False
+    shot_like = type("ShotLike", (), {})()
+    shot_like.speaker = str(speaker.get("id") or speaker.get("name") or "")
+    return shot_needs_lipsync(shot_like)
 
 
 def _visual_prompt_for_beat(

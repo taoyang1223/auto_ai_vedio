@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import shutil
+import json
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -10,6 +11,7 @@ from .manifest import ManifestStore
 from .models import Project
 from .project import resolve_project_path
 from .jobs import utc_now_iso
+from .shot_policy import selected_clip_for_shot
 
 
 class RenderRunner(Protocol):
@@ -34,9 +36,7 @@ def build_render_plan(project: Project) -> dict:
     has_audio = False
     for shot in project.shots:
         entry = manifest_shots.get(shot.id, {})
-        source_clip = entry.get("clip")
-        lipsync_clip = entry.get("lipsync_clip")
-        clip = lipsync_clip or source_clip
+        clip, source_clip, lipsync_clip, use_lipsync = selected_clip_for_shot(shot, entry)
         if not clip:
             raise RenderError(
                 f"shot {shot.id} has no generated clip in manifest",
@@ -46,14 +46,19 @@ def build_render_plan(project: Project) -> dict:
         clip_path = resolve_project_path(project.config.root, str(clip))
         audio_path = resolve_project_path(project.config.root, str(audio)) if audio else None
         has_audio = has_audio or bool(audio)
+        media_duration = _media_duration_seconds(clip_path)
+        render_duration = round(media_duration, 3) if media_duration else shot.duration
         shots.append(
             {
                 "id": shot.id,
                 "clip": str(clip),
                 "source_clip": str(source_clip) if source_clip else None,
                 "lipsync_clip": str(lipsync_clip) if lipsync_clip else None,
+                "use_lipsync": use_lipsync,
                 "clip_path": clip_path.as_posix(),
-                "duration": shot.duration,
+                "duration": render_duration,
+                "planned_duration": shot.duration,
+                "media_duration": media_duration,
                 "subtitle": shot.subtitle,
                 "exists": clip_path.exists(),
                 "bytes": clip_path.stat().st_size if clip_path.exists() else 0,
@@ -188,6 +193,21 @@ def _quality_checks(plan: dict[str, Any]) -> list[dict[str, Any]]:
                 "bytes": shot["bytes"],
             }
         )
+        if shot.get("media_duration") and float(shot.get("planned_duration") or 0) > 0:
+            ratio = float(shot["media_duration"]) / float(shot["planned_duration"])
+            if ratio < 0.75:
+                checks.append(
+                    {
+                        "name": "clip_duration_short",
+                        "shot_id": shot["id"],
+                        "status": "warning",
+                        "message": (
+                            f"clip {shot['clip']} is {float(shot['media_duration']):.2f}s, "
+                            f"planned {float(shot['planned_duration']):.2f}s"
+                        ),
+                        "fix": "短对白镜头可以接受；若这是旁白或空镜，请重生成视频或检查是否误用了口型同步版本。",
+                    }
+                )
         if shot.get("audio") and not shot.get("audio_exists"):
             checks.append(
                 {
@@ -217,6 +237,38 @@ def _write_concat_file(project_root: Path, plan: dict[str, Any], concat_file: Pa
         path = resolve_project_path(project_root, str(shot["clip"]))
         lines.append(f"file '{path.as_posix()}'")
     concat_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _media_duration_seconds(path: Path) -> float | None:
+    if not path.exists() or not path.is_file():
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                path.as_posix(),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        value = json.loads(completed.stdout or "{}").get("format", {}).get("duration")
+        duration = float(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return duration if duration > 0 else None
 
 
 def _assemble_voiceover(root: Path, plan: dict[str, Any], output: Path, runner: RenderRunner) -> dict[str, Any]:

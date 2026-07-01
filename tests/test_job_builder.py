@@ -109,6 +109,41 @@ def test_build_lipsync_job_ignores_first_frame_refs(demo_project_files):
     ]
 
 
+def test_build_lipsync_jobs_skip_narrator_shots(demo_project_files):
+    (demo_project_files / "shots.json").write_text(
+        json.dumps(
+            {
+                "shots": [
+                    {
+                        "id": "S01",
+                        "title": "旁白空镜",
+                        "duration": 5,
+                        "speaker": "narrator",
+                        "visual_prompt": "quiet room",
+                        "subtitle": "旁白介绍房间。",
+                    },
+                    {
+                        "id": "S02",
+                        "title": "角色对白",
+                        "duration": 4,
+                        "speaker": "char_hero",
+                        "visual_prompt": "hero speaking",
+                        "subtitle": "我醒了。",
+                    },
+                ]
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    project = load_project(demo_project_files)
+
+    jobs = build_jobs(project, kind="lipsync", provider_name="mock")
+
+    assert [job.shot_id for job in jobs] == ["S02"]
+
+
 def test_build_jobs_injects_project_prompt_profile(demo_project_files):
     with (demo_project_files / "project.yaml").open("a", encoding="utf-8") as handle:
         handle.write(

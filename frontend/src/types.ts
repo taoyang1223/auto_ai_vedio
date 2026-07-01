@@ -219,11 +219,13 @@ export type NovelDraftResult = {
     duration: number;
     shot_count: number;
     shot_seconds: number;
+    requested_shot_seconds?: number;
     provider: string;
     analyzer?: string;
     analyzer_error?: string;
     auto_plan?: boolean;
     plan_rationale?: string;
+    duration_note?: string;
   };
 };
 

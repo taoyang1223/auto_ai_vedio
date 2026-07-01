@@ -36,6 +36,7 @@ from .remote_transport import run_remote_worker
 from .remote_wrapup import RemoteWrapupOptions, run_remote_wrapup
 from .render import assemble_project
 from .script_storyboard import draft_storyboard_from_script
+from .shot_policy import shot_needs_lipsync
 from .templates import init_project, list_templates
 from .validation import validate_project
 from .web_tasks import TaskLogger, WebTaskQueue
@@ -579,8 +580,9 @@ def _task_progress(project_root: Path, task: dict[str, Any]) -> dict[str, Any]:
 
 def _production_task_progress(project_root: Path, task: dict[str, Any]) -> dict[str, Any]:
     project = load_project(project_root)
-    shot_ids = [shot.id for shot in project.shots]
-    total = len(shot_ids)
+    shot_ids_by_step = _progress_shot_ids(project)
+    shot_ids = shot_ids_by_step["videos"]
+    totals = _progress_totals(shot_ids_by_step)
     remote_media = _remote_progress_media(project, task)
     local_media = _local_progress_media(project)
     counts = {
@@ -590,10 +592,10 @@ def _production_task_progress(project_root: Path, task: dict[str, Any]) -> dict[
         "lipsync": max(len(local_media["lipsync"]), len(remote_media.get("lipsync", []))),
         "assemble": len(local_media["final"]),
     }
-    active_key = _active_pipeline_key(task, counts, total)
-    steps = _pipeline_steps(task, active_key, counts, total)
+    active_key = _active_pipeline_key(task, counts, totals)
+    steps = _pipeline_steps(task, active_key, counts, totals)
     media = [*local_media["videos"], *local_media["lipsync"], *local_media["final"]]
-    current = _current_item(active_key, shot_ids, counts)
+    current = _current_item(active_key, shot_ids_by_step.get(active_key or "", shot_ids), counts)
     return {
         "available": True,
         "kind": "production",
@@ -616,12 +618,14 @@ def _production_task_progress(project_root: Path, task: dict[str, Any]) -> dict[
 
 def _single_generation_progress(project_root: Path, task: dict[str, Any], *, forced_step: str | None = None) -> dict[str, Any]:
     project = load_project(project_root)
-    total = len(project.shots)
+    shot_ids_by_step = _progress_shot_ids(project)
     remote_media = _remote_progress_media(project, task)
     local_media = _local_progress_media(project)
     payload = task.get("payload") if isinstance(task.get("payload"), dict) else {}
     kind = str(payload.get("kind") or "")
     active_key = forced_step or ("lipsync" if kind == "lipsync" else "first_frames" if kind == "image" else "videos")
+    active_shot_ids = shot_ids_by_step.get(active_key, shot_ids_by_step["videos"])
+    total = len(active_shot_ids)
     counts = {
         "first_frames": max(_first_frame_count(project), len(remote_media.get("first_frames", []))),
         "videos": max(len(local_media["videos"]), len(remote_media.get("videos", []))),
@@ -644,7 +648,7 @@ def _single_generation_progress(project_root: Path, task: dict[str, Any], *, for
         "status": task.get("status"),
         "current_module": active_key,
         "current_label": _pipeline_label(active_key),
-        "current_item": _current_item(active_key, [shot.id for shot in project.shots], counts),
+        "current_item": _current_item(active_key, active_shot_ids, counts),
         "percent": _overall_percent(steps, task),
         "steps": steps,
         "media": [*local_media["videos"], *local_media["lipsync"], *local_media["final"]],
@@ -658,12 +662,12 @@ def _single_generation_progress(project_root: Path, task: dict[str, Any], *, for
     }
 
 
-def _pipeline_steps(task: dict[str, Any], active_key: str | None, counts: dict[str, int], total_shots: int) -> list[dict[str, Any]]:
+def _pipeline_steps(task: dict[str, Any], active_key: str | None, counts: dict[str, int], totals: dict[str, int]) -> list[dict[str, Any]]:
     active_index = _pipeline_index(active_key)
     steps: list[dict[str, Any]] = []
     for index, raw in enumerate(PRODUCTION_PIPELINE):
         key = str(raw["key"])
-        total = total_shots if key in {"first_frames", "videos", "voiceover", "lipsync"} else 1
+        total = totals.get(key, 1)
         completed = 0
         if key == "validate":
             completed = 1 if task.get("status") in {"running", "succeeded", "failed"} else 0
@@ -721,7 +725,7 @@ def _overall_percent(steps: list[dict[str, Any]], task: dict[str, Any]) -> int:
     return int(round((done / len(steps)) * 100))
 
 
-def _active_pipeline_key(task: dict[str, Any], counts: dict[str, int], total_shots: int) -> str | None:
+def _active_pipeline_key(task: dict[str, Any], counts: dict[str, int], totals: dict[str, int]) -> str | None:
     status = str(task.get("status") or "")
     logs = task.get("logs") if isinstance(task.get("logs"), list) else []
     for raw in reversed(logs):
@@ -734,7 +738,7 @@ def _active_pipeline_key(task: dict[str, Any], counts: dict[str, int], total_sho
     if status in {"succeeded"}:
         return "assemble"
     for key in ("first_frames", "videos", "voiceover", "lipsync"):
-        if counts.get(key, 0) < total_shots:
+        if counts.get(key, 0) < totals.get(key, 0):
             return key
     if counts.get("assemble", 0) <= 0:
         return "assemble"
@@ -761,6 +765,29 @@ def _current_item(active_key: str | None, shot_ids: list[str], counts: dict[str,
     completed = min(max(counts.get(active_key, 0), 0), len(shot_ids))
     index = min(completed, len(shot_ids) - 1)
     return {"shot_id": shot_ids[index], "index": index + 1, "total": len(shot_ids)}
+
+
+def _progress_shot_ids(project: Any) -> dict[str, list[str]]:
+    all_ids = [shot.id for shot in project.shots]
+    lipsync_ids = [shot.id for shot in project.shots if shot_needs_lipsync(shot)]
+    return {
+        "first_frames": all_ids,
+        "videos": all_ids,
+        "voiceover": all_ids,
+        "lipsync": lipsync_ids,
+    }
+
+
+def _progress_totals(shot_ids_by_step: dict[str, list[str]]) -> dict[str, int]:
+    return {
+        "validate": 1,
+        "first_frames": len(shot_ids_by_step.get("first_frames", [])),
+        "videos": len(shot_ids_by_step.get("videos", [])),
+        "voiceover": len(shot_ids_by_step.get("voiceover", [])),
+        "lipsync": len(shot_ids_by_step.get("lipsync", [])),
+        "probe": 1,
+        "assemble": 1,
+    }
 
 
 def _pause_state(task: dict[str, Any]) -> dict[str, Any]:

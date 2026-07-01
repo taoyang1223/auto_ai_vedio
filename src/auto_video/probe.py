@@ -15,6 +15,7 @@ from .media_quality import (
 )
 from .models import Project
 from .project import resolve_project_path
+from .shot_policy import selected_clip_for_shot
 
 
 def probe_project(
@@ -33,15 +34,17 @@ def probe_project(
     media_runner = runner or SubprocessMediaProbeRunner(ffprobe=ffprobe, ffmpeg=ffmpeg)
     for shot in project.shots:
         entry = manifest_shots.get(shot.id, {})
+        clip, source_clip, lipsync_clip, use_lipsync = selected_clip_for_shot(shot, entry)
         manifest_duration = entry.get("duration")
         stretch_ratio = None
         if manifest_duration:
             stretch_ratio = round(float(shot.duration) / float(manifest_duration), 3)
         shot_report = {
             "id": shot.id,
-            "clip": entry.get("lipsync_clip") or entry.get("clip"),
-            "source_clip": entry.get("clip"),
-            "lipsync_clip": entry.get("lipsync_clip"),
+            "clip": clip,
+            "source_clip": source_clip,
+            "lipsync_clip": lipsync_clip,
+            "use_lipsync": use_lipsync,
             "target_duration": shot.duration,
             "manifest_duration": manifest_duration,
             "stretch_ratio": stretch_ratio,
@@ -50,7 +53,7 @@ def probe_project(
         quality = _probe_clip(
             project,
             shot_id=shot.id,
-            clip=entry.get("lipsync_clip") or entry.get("clip"),
+            clip=clip,
             target_duration=shot.duration,
             dry_run=dry_run,
             runner=media_runner,

@@ -1250,7 +1250,7 @@ function NovelChapterPanel() {
   const [chapterText, setChapterText] = useState("");
   const [chapterTitle, setChapterTitle] = useState("");
   const [targetMinutes, setTargetMinutes] = useState("20");
-  const [shotSeconds, setShotSeconds] = useState("12");
+  const [shotSeconds, setShotSeconds] = useState("6");
   const [provider, setProvider] = useState("");
   const [autoPlan, setAutoPlan] = useState(true);
   const [draft, setDraft] = useState<NovelDraftResult | null>(null);
@@ -1271,7 +1271,7 @@ function NovelChapterPanel() {
     setChapterText(savedForm.chapterText || "");
     setChapterTitle(savedForm.chapterTitle || `第${(novel?.chapters.length || 0) + 1}章`);
     setTargetMinutes(savedForm.targetMinutes || "20");
-    setShotSeconds(savedForm.shotSeconds || "12");
+    setShotSeconds(savedForm.shotSeconds || "6");
     setProvider(savedForm.provider || detail.config.default_video_provider);
     setAutoPlan(savedForm.autoPlan ?? true);
     setDraft(null);
@@ -1557,6 +1557,11 @@ function NovelChapterPanel() {
           {draft?.meta.plan_rationale ? (
             <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
               {draft.meta.plan_rationale}
+            </div>
+          ) : null}
+          {draft?.meta.duration_note ? (
+            <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-800">
+              {draft.meta.duration_note}
             </div>
           ) : null}
           {draft?.meta.analyzer_error ? (

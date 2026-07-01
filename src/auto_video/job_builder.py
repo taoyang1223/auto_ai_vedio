@@ -17,6 +17,7 @@ from .first_frame_prompt import draft_first_frame_prompts
 from .models import Project, ShotPlan
 from .project import resolve_project_path
 from .prompts import plan_prompt
+from .shot_policy import shot_needs_lipsync
 
 
 def _default_provider(project: Project, kind: str) -> str:
@@ -143,6 +144,8 @@ def build_jobs(
     jobs: list[GenerationJob] = []
     image_prompts = _first_frame_prompt_map(project) if kind == "image" else {}
     for shot in _select_shots(project, only):
+        if kind == "lipsync" and not shot_needs_lipsync(shot):
+            continue
         provider = provider_name or (shot.provider if kind == "video" else None) or _default_provider(project, kind)
         prompt = image_prompts.get(shot.id, {}).get("prompt") or (
             _lipsync_prompt(shot) if kind == "lipsync" else plan_prompt(
